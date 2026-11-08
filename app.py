@@ -203,6 +203,8 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   <p><strong>Founding price: $149</strong> per evidence pack ·
   <strong>$39/month</strong> monitoring with re-scan alerts.</p>
   <a class="btn" href="/scan">Scan my website</a>
+  <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149</a>
+  <a class="btn" href="https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01">Add monitoring — $39/month</a>
 </div>
 
 <div class="card">
@@ -216,6 +218,7 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   the corrected draft, and keeps the clocks in a vault.</p>
   <p><strong>Founding price: $49/month</strong> flat per company.</p>
   <a class="btn" href="/postcheck">Check a job posting</a>
+  <a class="btn" href="https://buy.stripe.com/14A8wI5oZairbCugbq5Rm02">Subscribe — $49/month</a>
 </div>
 
 <div class="card">
