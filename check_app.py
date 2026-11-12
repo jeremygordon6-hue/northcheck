@@ -26,6 +26,11 @@ ports, then asserts:
     from a NORTHCHECK_DNS_FIXTURE JSON file — fully offline), and
     its evidence pack.
 
+  * SEO layer: per-page meta descriptions / Open Graph / canonical
+    tags, homepage JSON-LD (Organization + FAQPage), /sitemap.xml and
+    /robots.txt, and the /aoda-compliance-report deadline landing
+    page (December 31, 2026, who must file, does-not-file honesty).
+
 The app's data/ directory is backed up first and restored afterwards,
 so founding signups, scans and vault entries from real use are never
 touched by the test run.
@@ -806,6 +811,78 @@ def app_emailauth_checks():
     check("emailauth rejects a non-domain (400)", s == 400)
 
 
+def _meta_description(body):
+    import re as _re
+    m = _re.search(r'<meta name="description" content="([^"]*)"',
+                   body)
+    return m.group(1) if m else None
+
+
+def _json_ld_types(body):
+    import re as _re
+    types = []
+    for raw in _re.findall(
+            r'<script type="application/ld\+json">(.*?)</script>',
+            body, _re.S):
+        try:
+            types.append(_json_mod.loads(raw).get("@type"))
+        except ValueError:
+            types.append(None)
+    return types
+
+
+def app_seo_checks():
+    print("\n== SEO: metadata, sitemap, robots, AODA report page ==")
+    s, body = get("/")
+    check("seo: homepage carries a meta description",
+          bool(_meta_description(body)))
+    check("seo: homepage carries og:title",
+          'property="og:title"' in body)
+    check("seo: homepage canonical is the production root",
+          '<link rel="canonical" href="https://getnorthcheck.ca/">'
+          in body)
+    check("seo: homepage JSON-LD parses (Organization + FAQPage)",
+          _json_ld_types(body) == ["Organization", "FAQPage"],
+          f"types {_json_ld_types(body)}")
+    check("seo: homepage links the AODA report landing page",
+          'href="/aoda-compliance-report"' in body)
+    home_desc = _meta_description(body)
+    s, scan = get("/scan")
+    check("seo: scan page description differs from the homepage's",
+          bool(_meta_description(scan))
+          and _meta_description(scan) != home_desc)
+    check("seo: scan canonical is /scan on the production domain",
+          '<link rel="canonical" href="https://getnorthcheck.ca'
+          '/scan">' in scan)
+    s, sm = get("/sitemap.xml")
+    expected = ["/", "/aoda-compliance-report", "/scan", "/filing",
+                "/loi25", "/francais", "/emailauth", "/postcheck",
+                "/vault"]
+    check("seo: sitemap 200 listing exactly the public pages",
+          s == 200
+          and all(f"<loc>https://getnorthcheck.ca{p}</loc>" in sm
+                  for p in expected)
+          and sm.count("<url>") == len(expected)
+          and "/pack/" not in sm and "/filing/view/" not in sm,
+          f"status {s}")
+    s, rb = get("/robots.txt")
+    check("seo: robots 200 referencing the sitemap",
+          s == 200
+          and "Sitemap: https://getnorthcheck.ca/sitemap.xml" in rb)
+    s, body = get("/aoda-compliance-report")
+    check("aoda report page 200", s == 200)
+    check("aoda report page states the December 31, 2026 deadline",
+          "December 31, 2026" in body)
+    check("aoda report page states who must file (20 or more "
+          "employees)", "20 or more employees" in body)
+    check("aoda report page carries the does-not-file honesty "
+          "wording",
+          "does not file the report" in body
+          and "does not certify" in body)
+    check("aoda report page names both pack prices ($149 / $249)",
+          "$149" in body and "$249" in body)
+
+
 def main():
     backup_dir = DATA_DIR + ".check-backup"
     if os.path.exists(backup_dir):
@@ -840,6 +917,7 @@ def main():
         app_new_module_checks()
         app_filing_checks()
         app_emailauth_checks()
+        app_seo_checks()
     finally:
         app.terminate()
         fix.shutdown()
