@@ -230,7 +230,7 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   your site. <strong>Founding price: $249</strong> for the Complete
   Filing Pack.</p>
   <a class="btn" href="/filing">Complete the Filing checklist</a>
-  <a class="btn" href="/#founding">Join the founding list</a><br>
+  <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249</a><br>
   <a class="btn" href="/scan">Scan my website</a>
   <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149</a>
   <a class="btn" href="https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01">Add monitoring — $39/month</a>
