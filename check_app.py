@@ -838,6 +838,14 @@ def app_seo_checks():
           bool(_meta_description(body)))
     check("seo: homepage carries og:title",
           'property="og:title"' in body)
+    check("seo: homepage carries the google-site-verification "
+          "meta",
+          '<meta name="google-site-verification" '
+          'content="GP0cHkACrflT-3zNe7A33me-mfctb1OgeCyK7ZlHNfo">'
+          in body)
+    check("seo: homepage carries the msvalidate.01 meta",
+          '<meta name="msvalidate.01" '
+          'content="5A6E6E3DD0931B9DB02307A62305125F">' in body)
     check("seo: homepage canonical is the production root",
           '<link rel="canonical" href="https://getnorthcheck.ca/">'
           in body)
