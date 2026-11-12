@@ -10,6 +10,11 @@ Canadian SMB compliance platform, Phase 1 modules:
   * PostCheck ON — check a job posting against Ontario's Jan 1, 2026
     posting rules (O. Reg. 476/24) and keep its 45-day / 3-year clocks
     in a vault.
+  * Loi25 Kit — Quebec Law 25 evidence from the public website:
+    privacy policy linked from the homepage, a named privacy officer,
+    a cookie consent mechanism, and a French privacy policy.
+  * Français Check — whether a real French version of the site exists
+    and its key pages (home, contact, privacy) resolve in French.
 
 Stack: Python standard library only — http.server, server-rendered
 HTML with inline CSS, no JavaScript frameworks, no external requests.
@@ -156,6 +161,8 @@ def page(title, body):
   <nav>
     <a href="/scan">AODA scan</a>
     <a href="/postcheck">PostCheck</a>
+    <a href="/loi25">Loi25 Kit</a>
+    <a href="/francais">Français Check</a>
     <a href="/vault">Vault</a>
   </nav>
 </header>
@@ -222,21 +229,34 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
 </div>
 
 <div class="card">
-  <h2>Loi25 Kit <span class="badge soon">Coming soon</span></h2>
+  <h2>Loi25 Kit <span class="badge">Module 3 — live</span></h2>
   <p>Quebec's Law 25 binds any business holding Quebecers' personal
-  information — including sellers outside Quebec. Privacy officer,
-  incident register, privacy impact assessments, bilingual policy.
-  On the same engine; not yet open.</p>
+  information — including sellers outside Quebec. Loi25 Kit checks
+  what a public website can honestly show: a privacy policy linked
+  from the homepage, a named privacy officer or privacy contact, a
+  cookie consent mechanism visible in the served HTML, and a French
+  version of the privacy policy — then builds the same dated
+  evidence pack as AODA FileReady. Law 25 duties that leave no trace
+  on a website (an incident register, privacy impact assessments)
+  are out of scope and are never implied.</p>
+  <p><strong>Founding price: $39/month</strong> per site.</p>
+  <a class="btn" href="/loi25">Run the Loi25 check</a>
+  <a class="btn" href="/#founding">Join the founding list</a>
 </div>
 
 <div class="card">
-  <h2>Français Check <span class="badge soon">Coming soon</span></h2>
-  <p>Bill 96 audit layer above translation tools: French predominance,
-  trademark descriptors, and OQLF francization triggers for stores and
-  sites selling into Quebec. On the same engine; not yet open.</p>
+  <h2>Français Check <span class="badge">Module 4 — live</span></h2>
+  <p>Selling into Quebec starts with a French version that actually
+  exists. Français Check verifies reachability, not translation
+  quality: a French entry point from the homepage, hreflang
+  declarations tying the versions together, and the French
+  counterparts of your home, contact and privacy pages resolving
+  in French.</p>
+  <p><strong>Included</strong> with a scan or monitoring plan.</p>
+  <a class="btn" href="/francais">Check my French version</a>
 </div>
 
-<div class="card">
+<div class="card" id="founding">
   <h2>Join the founding list</h2>
   <p>Founding pricing is locked for the first cohort. Leave an email and
   we will write when your module opens. No email is sent by this form —
@@ -497,6 +517,314 @@ evidence and makes the call.</p>
 
 
 # ---------------------------------------------------------------------------
+# Loi25 Kit + Français Check — site-level scans on the shared crawler
+# ---------------------------------------------------------------------------
+
+def _fetch_one(url):
+    """Fetch one URL as HTML. Returns (ok, html_text, error_string)."""
+    try:
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "NorthCheck/1.0"})
+        with urllib.request.urlopen(req, timeout=PAGE_TIMEOUT) as resp:
+            ctype = resp.headers.get_content_type()
+            if ctype != "text/html":
+                return False, None, f"content type {ctype}, not HTML"
+            raw = resp.read(MAX_BODY + 1)
+    except urllib.error.HTTPError as exc:
+        return False, None, f"HTTP {exc.code}"
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return False, None, f"could not be fetched ({exc})"
+    return True, raw.decode("utf-8", errors="replace"), None
+
+
+def _key_page_url(pages, marker):
+    """First crawled URL whose path contains marker, else None."""
+    for p in pages:
+        if marker in urllib.parse.urlparse(p["url"]).path.lower():
+            return p["url"]
+    return None
+
+
+def _store_site_record(record):
+    scans = load_list(SCANS_PATH)
+    scans.append(record)
+    _save(SCANS_PATH, scans)
+    return record
+
+
+def run_loi25_scan(start_url):
+    pages, errors = crawl(start_url)
+    findings, stats = (nc.run_loi25_checks(pages) if pages
+                       else ([], {}))
+    return _store_site_record({
+        "id": uuid.uuid4().hex[:12],
+        "module": "loi25",
+        "start_url": start_url,
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "pages": [p["url"] for p in pages],
+        "errors": errors,
+        "findings": findings,
+        "stats": stats,
+        "total_findings": len(findings),
+    })
+
+
+def run_francais_scan(start_url):
+    pages, errors = crawl(start_url)
+    attempts = []
+    findings, stats = [], {}
+    if pages:
+        crawled = {p["url"]: p["html"] for p in pages}
+        targets = [("home", start_url)]
+        contact = _key_page_url(pages, "contact")
+        if contact and contact != start_url:
+            targets.append(("contact", contact))
+        privacy = (_key_page_url(pages, "privacy")
+                   or _key_page_url(pages, "confidential"))
+        if privacy and privacy != start_url:
+            targets.append(("privacy", privacy))
+        for role, url in targets:
+            variant = nc.french_variant_url(url)
+            if variant in crawled:
+                lang = nc.parse_site_page(crawled[variant]).html_lang
+                attempts.append({"role": role, "url": variant,
+                                 "ok": True, "lang": lang, "error": None})
+                continue
+            ok, html_text, error = _fetch_one(variant)
+            lang = nc.parse_site_page(html_text).html_lang if ok else None
+            attempts.append({"role": role, "url": variant, "ok": ok,
+                             "lang": lang, "error": error})
+        findings, stats = nc.run_francais_checks(pages, attempts)
+    return _store_site_record({
+        "id": uuid.uuid4().hex[:12],
+        "module": "francais",
+        "start_url": start_url,
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "pages": [p["url"] for p in pages],
+        "errors": errors,
+        "findings": findings,
+        "stats": stats,
+        "attempts": attempts,
+        "total_findings": len(findings),
+    })
+
+
+def _site_form_page(module, error=None):
+    err = f'<div class="notice">{escape(error)}</div>' if error else ""
+    if module == "loi25":
+        title = "Loi25 Kit — website check"
+        intro = ("Enter your website address. NorthCheck crawls up to "
+                 f"{MAX_PAGES} pages on the same domain and checks what "
+                 "the public site can honestly show for Quebec's Law 25: "
+                 "a privacy policy linked from the homepage, a named "
+                 "privacy officer or privacy contact, a cookie consent "
+                 "mechanism, and a French version of the privacy policy.")
+        action, cta = "/loi25", "Run the Loi25 check"
+    else:
+        title = "Français Check — French version check"
+        intro = ("Enter your website address. NorthCheck crawls up to "
+                 f"{MAX_PAGES} pages on the same domain, then tries the "
+                 "conventional French addresses (/fr/…) for your home, "
+                 "contact and privacy pages and checks that they resolve "
+                 "in French.")
+        action, cta = "/francais", "Run the Français Check"
+    body = f"""
+<h1>{title}</h1>
+<p>{intro}</p>
+{err}
+<div class="card">
+  <form method="post" action="{action}">
+    <label for="url">Website URL (http or https)</label>
+    <input type="url" id="url" name="url" required
+           placeholder="https://yourbusiness.ca">
+    <button type="submit">{cta}</button>
+  </form>
+</div>
+<p class="small">{HONESTY_LINE}</p>
+"""
+    return page(title, body)
+
+
+def _site_results_page(record, heading, stats_rows, extra_card=""):
+    counts = nc.count_by_severity(record["findings"])
+    counts_line = " · ".join(
+        f"{sev} {counts[sev]}" for sev in ("high", "medium", "low", "info"))
+    stats_html = "".join(
+        f"<li><strong>{escape(k)}:</strong> {escape(v)}</li>"
+        for k, v in stats_rows)
+    errors_html = ""
+    if record["errors"]:
+        items = "".join(f"<li>{escape(e)}</li>" for e in record["errors"])
+        errors_html = f"""
+<div class="card">
+  <h2>Pages not scanned</h2>
+  <ul>{items}</ul>
+</div>"""
+    body = f"""
+<h1>{heading}</h1>
+<p>Site: <strong>{escape(record['start_url'])}</strong><br>
+Scanned: {escape(record['timestamp'])} · {len(record['pages'])} page(s) ·
+<strong>{record['total_findings']} issues to review in total</strong>
+({counts_line})</p>
+<p><a class="btn" href="/pack/{record['id']}">Download the evidence pack (HTML)</a></p>
+
+<div class="card">
+  <h2>What was checked</h2>
+  <ul>{stats_html}</ul>
+</div>
+{extra_card}
+<div class="card">
+  <h2>Issues to review</h2>
+  {findings_html(record['findings'])}
+</div>
+{errors_html}
+<div class="card">
+  <h2>Honesty note</h2>
+  <p>Every item above is an issue to review, found by deterministic
+  checks. A finding is not a determination that a site is compliant or
+  non-compliant, and an empty findings list would not be a guarantee of
+  compliance either. The signing officer reviews the evidence and makes
+  the call.</p>
+  <p class="small">{nc.DRAFT_STAMP}</p>
+</div>
+"""
+    return page(heading, body)
+
+
+def _yesno(flag):
+    return "yes" if flag else "no"
+
+
+def loi25_results_page(record):
+    s = record["stats"]
+    rows = [
+        ("Privacy policy linked from the homepage",
+         _yesno(s.get("privacy_link_found"))),
+        ("Privacy pages scanned", str(s.get("privacy_pages_scanned", 0))),
+        ("Privacy officer / contact named",
+         _yesno(s.get("officer_found"))),
+        ("Cookie consent mechanism detected",
+         _yesno(s.get("cookie_consent_found"))),
+        ("French privacy policy reachable",
+         _yesno(s.get("policy_french_reachable"))),
+    ]
+    return _site_results_page(record, "Loi25 Kit results", rows)
+
+
+def francais_results_page(record):
+    s = record["stats"]
+    rows = [
+        ("French entry point on the homepage",
+         _yesno(s.get("french_entry_found"))),
+        ("hreflang=\"fr\" declaration found",
+         _yesno(s.get("hreflang_fr_found"))),
+        ("French pages tried", str(s.get("attempts", 0))),
+        ("French pages resolved", str(s.get("attempts_ok", 0))),
+    ]
+    attempt_rows = "".join(f"""
+<tr>
+  <td>{escape(a['role'])}</td>
+  <td>{escape(a['url'])}</td>
+  <td>{'resolved' if a['ok'] else 'did not resolve'}</td>
+  <td>{escape(a.get('lang') or '—')}</td>
+</tr>""" for a in record["attempts"])
+    extra = f"""
+<div class="card">
+  <h2>French addresses tried</h2>
+  <table>
+    <tr><th>Page</th><th>French address</th><th>Result</th>
+        <th>Declared language</th></tr>
+    {attempt_rows}
+  </table>
+</div>"""
+    return _site_results_page(record, "Français Check results", rows,
+                              extra_card=extra)
+
+
+def _site_pack_html(record, module_label, stats_rows):
+    date_line = record["timestamp"][:10]
+    counts = nc.count_by_severity(record["findings"])
+    counts_line = " · ".join(
+        f"{sev} {counts[sev]}" for sev in ("high", "medium", "low", "info"))
+    stats_html = "".join(
+        f"<li><strong>{escape(k)}:</strong> {escape(v)}</li>"
+        for k, v in stats_rows)
+    pages_html = "".join(f"<li>{escape(u)}</li>" for u in record["pages"])
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NorthCheck Evidence Pack — {escape(module_label)}</title>
+<style>{CSS}</style>
+</head>
+<body>
+<main>
+<h1>NorthCheck Evidence Pack — {escape(module_label)}</h1>
+<p><strong>{escape(nc.DRAFT_STAMP, quote=False)}</strong></p>
+<ul>
+  <li><strong>Module:</strong> {escape(module_label)}</li>
+  <li><strong>Target:</strong> {escape(record['start_url'])}</li>
+  <li><strong>Date scanned:</strong> {escape(date_line)}</li>
+  <li><strong>Pages scanned:</strong> {len(record['pages'])}</li>
+  <li><strong>Total issues to review:</strong> {record['total_findings']}
+      ({counts_line})</li>
+</ul>
+<h2>What was checked</h2>
+<ul>{stats_html}</ul>
+<h2>Pages scanned</h2>
+<ul>{pages_html}</ul>
+<h2>Issues to review</h2>
+{findings_html(record['findings'])}
+<h2>Honesty note</h2>
+<p>Every item above is an issue to review, found by deterministic checks
+against the stated rules. A finding means the check matched something
+worth a human look — it is not a determination that the target is
+compliant or non-compliant, and an empty findings list would not be a
+guarantee of compliance either. The signing officer / owner reviews the
+evidence and makes the call.</p>
+<hr>
+<p class="small">Generated by NorthCheck. {HONESTY_LINE}</p>
+</main>
+</body>
+</html>
+"""
+
+
+def loi25_pack_html(record):
+    s = record["stats"]
+    rows = [
+        ("Privacy policy linked from the homepage",
+         _yesno(s.get("privacy_link_found"))),
+        ("Privacy pages scanned", str(s.get("privacy_pages_scanned", 0))),
+        ("Privacy officer / contact named",
+         _yesno(s.get("officer_found"))),
+        ("Cookie consent mechanism detected",
+         _yesno(s.get("cookie_consent_found"))),
+        ("French privacy policy reachable",
+         _yesno(s.get("policy_french_reachable"))),
+    ]
+    return _site_pack_html(record, "Loi25 Kit — Quebec Law 25 website "
+                                   "evidence", rows)
+
+
+def francais_pack_html(record):
+    s = record["stats"]
+    rows = [
+        ("French entry point on the homepage",
+         _yesno(s.get("french_entry_found"))),
+        ("hreflang=\"fr\" declaration found",
+         _yesno(s.get("hreflang_fr_found"))),
+        ("French pages tried", str(s.get("attempts", 0))),
+        ("French pages resolved", str(s.get("attempts_ok", 0))),
+    ]
+    rows += [(f"French {a['role']} page", a["url"] + " — "
+              + ("resolved" if a["ok"] else "did not resolve"))
+             for a in record["attempts"]]
+    return _site_pack_html(record, "Français Check — French version "
+                                   "reachability", rows)
+
+
+# ---------------------------------------------------------------------------
 # PostCheck
 # ---------------------------------------------------------------------------
 
@@ -694,6 +1022,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, landing_page(joined=joined))
         elif path == "/scan":
             self._send(200, scan_form_page())
+        elif path == "/loi25":
+            self._send(200, _site_form_page("loi25"))
+        elif path == "/francais":
+            self._send(200, _site_form_page("francais"))
         elif path == "/postcheck":
             self._send(200, postcheck_form_page())
         elif path == "/vault":
@@ -706,8 +1038,15 @@ class Handler(BaseHTTPRequestHandler):
             if record is None:
                 self._not_found()
             else:
+                module = record.get("module")
+                if module == "loi25":
+                    pack = loi25_pack_html(record)
+                elif module == "francais":
+                    pack = francais_pack_html(record)
+                else:
+                    pack = evidence_pack_html(record)
                 self._send(
-                    200, evidence_pack_html(record),
+                    200, pack,
                     extra_headers={
                         "Content-Disposition":
                             f'attachment; filename="northcheck_evidence_'
@@ -749,6 +1088,28 @@ class Handler(BaseHTTPRequestHandler):
                     f"({detail}). Check the URL and try again."))
                 return
             self._send(200, scan_results_page(record))
+        elif path in ("/loi25", "/francais"):
+            module = path.lstrip("/")
+            url = (form.get("url") or "").strip()
+            if not url.startswith(("http://", "https://")):
+                self._send(400, _site_form_page(
+                    module,
+                    "Enter a full URL starting with http:// or https://"))
+                return
+            if module == "loi25":
+                record = run_loi25_scan(url)
+                results = loi25_results_page
+            else:
+                record = run_francais_scan(url)
+                results = francais_results_page
+            if not record["pages"]:
+                detail = "; ".join(record["errors"]) or "no pages read"
+                self._send(400, _site_form_page(
+                    module,
+                    f"No HTML pages could be scanned at that address "
+                    f"({detail}). Check the URL and try again."))
+                return
+            self._send(200, results(record))
         elif path == "/postcheck":
             title = (form.get("title") or "").strip() or "Untitled posting"
             employer = (form.get("employer") or "").strip() \

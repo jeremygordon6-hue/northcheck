@@ -7,7 +7,18 @@ One shared engine, multiple compliance modules:
     input -> deterministic rule checks -> plain-English findings
           -> dated evidence pack -> deadline clocks / monitoring
 
-Phase 1 builds two modules on that engine:
+Phase 1 builds two modules on that engine, and the web app adds two
+site-level modules that reuse the same findings model, evidence pack
+renderer and honesty stamp (run_loi25_checks / run_francais_checks,
+driven by the app's crawler):
+
+  * loi25     : Loi25 Kit — Quebec Law 25 evidence a public website can
+                honestly show (privacy policy linked from the homepage,
+                named privacy officer, cookie consent, French policy).
+  * francais  : Français Check — a real French version exists and its
+                key pages (home, contact, privacy) resolve in French.
+
+The original two CLI modules:
 
   * scan      : AODA web-accessibility scan (module "AODA FileReady").
                 Input is a local HTML file or a URL. Applies deterministic
@@ -37,6 +48,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
@@ -715,6 +727,406 @@ def vault_save(entry, vault_path):
     with open(vault_path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
     return len(data)
+
+
+# ---------------------------------------------------------------------------
+# Shared site parser — everything the Loi25 and Français checks need
+# ---------------------------------------------------------------------------
+
+class SiteParser(HTMLParser):
+    """One streaming pass collecting site-level signals from one page.
+
+    Collects the <html lang>, anchor hrefs with their visible text,
+    <link rel="alternate" hreflang="..."> declarations, and the page's
+    normalized visible text. Script/style content is excluded from the
+    visible text; raw HTML stays available to the caller for marker
+    checks (e.g. consent-platform script names).
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.html_lang = None
+        self.links = []        # {href, text}
+        self.hreflangs = []    # values of hreflang on <link rel=alternate>
+        self.text_parts = []
+        self._anchors = []
+        self._skip = 0         # inside <script>/<style>
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "html":
+            self.html_lang = a.get("lang")
+        elif tag == "link":
+            if (a.get("rel") or "").lower() == "alternate" \
+                    and a.get("hreflang"):
+                self.hreflangs.append(a["hreflang"])
+        elif tag == "a":
+            self._anchors.append({"href": a.get("href"), "parts": []})
+        elif tag in ("script", "style"):
+            self._skip += 1
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._anchors:
+            ctx = self._anchors.pop()
+            self.links.append({
+                "href": ctx["href"],
+                "text": _norm_text(ctx["parts"]),
+            })
+        elif tag in ("script", "style") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if self._anchors:
+            self._anchors[-1]["parts"].append(data)
+        if not self._skip:
+            self.text_parts.append(data)
+
+    @property
+    def text(self):
+        return _norm_text(self.text_parts)
+
+
+def parse_site_page(html_text):
+    parser = SiteParser()
+    parser.feed(html_text)
+    parser.close()
+    return parser
+
+
+PRIVACY_HREF_MARKERS = ("privacy", "confidential", "vie-priv",
+                        "vie_privee", "renseignements-personnels")
+PRIVACY_TEXT_MARKERS = ("privacy", "confidentialité", "confidentialite",
+                        "vie privée", "vie privee")
+
+OFFICER_PATTERNS = [
+    r"privacy officer",
+    r"chief privacy officer",
+    r"privacy contact",
+    r"data protection officer",
+    r"responsable de la protection des renseignements personnels",
+    r"responsable des renseignements personnels",
+    r"responsable de la vie privée",
+    r"personne responsable[^.]{0,60}renseignements personnels",
+]
+
+# Consent language and the script markers of common consent platforms.
+# Detection runs over the HTML as served: a banner injected later by
+# JavaScript may not be visible to these checks (a stated limitation).
+COOKIE_TEXT_PATTERNS = [
+    r"cookies?[^.]{0,80}(consent|accept|agree|manage|preference|setting)",
+    r"(consent|accept|manage)[^.]{0,40}cookies?",
+    r"témoins[^.]{0,80}(consentement|accepter|gérer|préférences)",
+    r"(consentement|accepter)[^.]{0,40}témoins",
+]
+COOKIE_SCRIPT_MARKERS = ("cookiebot", "onetrust", "cookieyes", "didomi",
+                         "axeptio", "termly", "osano", "trustarc")
+
+
+def _find_privacy_links(parser):
+    out = []
+    for link in parser.links:
+        href = (link["href"] or "").lower()
+        text = link["text"].lower()
+        if any(m in href for m in PRIVACY_HREF_MARKERS) \
+                or any(m in text for m in PRIVACY_TEXT_MARKERS):
+            out.append(link)
+    return out
+
+
+def _page_role(url):
+    path = urllib.parse.urlparse(url).path.lower()
+    if any(m in path for m in PRIVACY_HREF_MARKERS):
+        return "privacy"
+    if "contact" in path:
+        return "contact"
+    return "page"
+
+
+# ---------------------------------------------------------------------------
+# Module Loi25 Kit — Quebec Law 25 evidence from the public website
+# ---------------------------------------------------------------------------
+# Only what a public website can honestly show is checked: a privacy
+# policy linked from the homepage, a named privacy officer / privacy
+# contact published somewhere on the scanned pages, a cookie consent
+# mechanism visible in the HTML as served, and a French version of the
+# privacy policy being reachable from the policy page. Law 25 duties
+# that leave no trace on a public website (incident register, privacy
+# impact assessments, internal governance) are out of scope by design
+# and are never implied by these findings.
+
+def run_loi25_checks(pages):
+    """Return (findings, stats) for a crawled site.
+
+    pages: list of {url, html} in crawl order — pages[0] is the
+    homepage the visitor entered.
+    """
+    findings = []
+    add = findings.append
+    parsed = [(p["url"], parse_site_page(p["html"]), p["html"])
+              for p in pages]
+    home_url, home, _home_html = parsed[0]
+
+    # LOI25-PRIVACY-LINK — policy linked from the homepage
+    privacy_links = _find_privacy_links(home)
+    if not privacy_links:
+        add(make_finding(
+            "loi25", "LOI25-PRIVACY-LINK", "high",
+            "Law 25 · privacy policy published",
+            "No privacy policy link could be found on the homepage. "
+            "Law 25 expects an organization to publish its governance "
+            "policies for personal information, and the published "
+            "privacy policy is the piece a visitor (or an assessor) "
+            "looks for first. If a policy exists but is not linked "
+            "from the homepage, it is effectively unpublished.",
+            "(no privacy policy link found on the homepage)",
+            "Publish the privacy policy and link it from the homepage "
+            "(the footer is the usual place), in the same place on "
+            "every page."))
+    stats_privacy_pages = [u for u, _p, _h in parsed
+                           if _page_role(u) == "privacy"]
+
+    # LOI25-OFFICER — named privacy officer / contact published
+    officer_evidence = None
+    for _url, parser, _html in parsed:
+        for pattern in OFFICER_PATTERNS:
+            m = re.search(pattern, parser.text, re.IGNORECASE)
+            if m:
+                start = max(0, m.start() - 40)
+                officer_evidence = parser.text[start:m.end() + 40]
+                break
+        if officer_evidence:
+            break
+    if not officer_evidence:
+        add(make_finding(
+            "loi25", "LOI25-OFFICER", "high",
+            "Law 25 · privacy officer identified",
+            "None of the scanned pages names a privacy officer or "
+            "privacy contact. Under Law 25 the person with the highest "
+            "authority is responsible for personal information by "
+            "default, and the title and contact details of the person "
+            "exercising that function must be published on the "
+            "organization's website.",
+            "(no privacy officer or privacy contact named on the "
+            "scanned pages)",
+            "Name the privacy officer (or the person responsible for "
+            "personal information) with a contact route and publish it "
+            "on the website — the privacy policy page is the usual "
+            "place."))
+
+    # LOI25-COOKIE — consent mechanism visible in the served HTML
+    cookie_evidence = None
+    for _url, parser, html_text in parsed:
+        raw = html_text.lower()
+        for marker in COOKIE_SCRIPT_MARKERS:
+            if marker in raw:
+                cookie_evidence = f"consent platform marker: {marker}"
+                break
+        if cookie_evidence:
+            break
+        for pattern in COOKIE_TEXT_PATTERNS:
+            m = re.search(pattern, parser.text, re.IGNORECASE)
+            if m:
+                cookie_evidence = m.group(0)
+                break
+        if cookie_evidence:
+            break
+    if not cookie_evidence:
+        add(make_finding(
+            "loi25", "LOI25-COOKIE", "medium",
+            "Law 25 · cookie consent",
+            "No cookie consent mechanism was visible in the HTML as "
+            "served (no consent wording and no known consent-platform "
+            "marker). Law 25 consent for cookies that identify, "
+            "locate or profile a visitor must be requested expressly. "
+            "A consent tool loaded entirely by JavaScript after the "
+            "page arrives may not be visible to this check — treat "
+            "this as a prompt to verify, in the browser, what a first "
+            "time visitor actually sees.",
+            "(no cookie consent mechanism detected in the scanned "
+            "pages)",
+            "Present a consent choice before non-essential cookies "
+            "are set, and keep the wording where a visitor (and this "
+            "scan) can see it."))
+
+    # LOI25-POLICY-FRENCH — French privacy policy reachable
+    policy_french = False
+    if privacy_links:
+        for url, parser, _html in parsed:
+            if _page_role(url) != "privacy":
+                continue
+            if (parser.html_lang or "").lower().startswith("fr"):
+                policy_french = True
+            if any((h or "").lower().startswith("fr")
+                   for h in parser.hreflangs):
+                policy_french = True
+            for link in parser.links:
+                href = (link["href"] or "").lower()
+                text = link["text"].lower()
+                if "/fr/" in href or href.rstrip("/").endswith("/fr") \
+                        or "français" in text or "francais" in text:
+                    policy_french = True
+        if stats_privacy_pages and not policy_french:
+            add(make_finding(
+                "loi25", "LOI25-POLICY-FRENCH", "medium",
+                "Law 25 · privacy policy in French",
+                "The privacy policy page was scanned, but no French "
+                "version of it appears reachable from it (no French "
+                "link, no hreflang declaration, and the page itself "
+                "is not in French). An organization serving Quebec "
+                "customers is expected to make its policy available "
+                "in French.",
+                stats_privacy_pages[0],
+                "Publish the French version of the privacy policy "
+                "and link it from the English policy page (and vice "
+                "versa), ideally with hreflang declarations."))
+        elif not stats_privacy_pages:
+            add(make_finding(
+                "loi25", "LOI25-POLICY-NOT-SCANNED", "info",
+                "Law 25 · privacy policy not in this scan",
+                "A privacy policy is linked from the homepage, but "
+                "the policy page itself was not among the pages this "
+                "scan fetched (the crawl is capped), so its contents "
+                "— including whether a French version is offered — "
+                "were not reviewed in this run.",
+                privacy_links[0]["href"] or "(privacy link)",
+                "No fix implied. Run a deeper scan, or check the "
+                "policy page directly, before relying on this pack "
+                "for the policy's contents."))
+
+    stats = {
+        "pages_scanned": len(pages),
+        "privacy_link_found": bool(privacy_links),
+        "privacy_pages_scanned": len(stats_privacy_pages),
+        "officer_found": bool(officer_evidence),
+        "cookie_consent_found": bool(cookie_evidence),
+        "policy_french_reachable": policy_french,
+    }
+    return findings, stats
+
+
+# ---------------------------------------------------------------------------
+# Module Français Check — does a real French version exist and resolve?
+# ---------------------------------------------------------------------------
+# Existence and reachability only: a French entry point on the
+# homepage (toggle link or /fr/ path), hreflang declarations, and the
+# French counterparts of the key pages (home, contact, privacy when
+# the English site has one) actually resolving with French content.
+# Translation quality is not assessed and is never implied.
+
+def french_variant_url(url):
+    """The conventional French counterpart: /fr prefixed to the path."""
+    parts = urllib.parse.urlparse(url)
+    path = parts.path or "/"
+    if path == "/fr" or path.startswith("/fr/"):
+        return url
+    new_path = "/fr" + (path if path != "/" else "/")
+    return urllib.parse.urlunparse(parts._replace(path=new_path))
+
+
+def _is_french_link(link):
+    href = (link["href"] or "").lower()
+    text = link["text"].strip().lower()
+    if "/fr/" in href or href.rstrip("/").endswith("/fr") \
+            or "://" in href and ".fr" in href.split("/")[2]:
+        return True
+    return text in ("fr", "français", "francais", "french") \
+        or "français" in text
+
+
+def run_francais_checks(pages, attempts):
+    """Return (findings, stats) for a crawled site plus French probes.
+
+    pages: list of {url, html} in crawl order (pages[0] is home).
+    attempts: list of {role, url, ok, lang, error} — one entry per key
+    page whose French counterpart the app tried to fetch. Roles are
+    "home", "contact", "privacy". ok=True means the URL returned an
+    HTML page; lang is that page's declared language when known.
+    """
+    findings = []
+    add = findings.append
+    home_url = pages[0]["url"]
+    home = parse_site_page(pages[0]["html"])
+    all_parsed = [(p["url"], parse_site_page(p["html"])) for p in pages]
+
+    # FR-ENTRY — a way into the French site from the homepage
+    entry_found = any(_is_french_link(link) for link in home.links) \
+        or any((h or "").lower().startswith("fr")
+               for h in home.hreflangs)
+    if not entry_found:
+        add(make_finding(
+            "francais", "FR-ENTRY", "high",
+            "French version · entry point",
+            "The homepage offers no visible way into a French "
+            "version: no French language link or toggle, and no "
+            "French hreflang declaration. A French site that cannot "
+            "be reached from the homepage effectively does not exist "
+            "for a French speaking visitor.",
+            "(no French link, toggle or hreflang on the homepage)",
+            "Add a clearly labelled French link (\"Français\") on the "
+            "homepage pointing at the French home page, and keep it "
+            "on every page."))
+
+    # FR-HREFLANG — declarations that tie the versions together
+    hreflang_fr = any((h or "").lower().startswith("fr")
+                      for _u, p in all_parsed for h in p.hreflangs)
+    if not hreflang_fr:
+        add(make_finding(
+            "francais", "FR-HREFLANG", "low",
+            "French version · hreflang declarations",
+            "No page in this scan declares a French alternate with "
+            "hreflang. Search engines use hreflang to send French "
+            "speakers to the French page instead of the English one; "
+            "without it the versions compete with each other.",
+            "(no hreflang=\"fr\" declaration found)",
+            "Add <link rel=\"alternate\" hreflang=\"fr\" ...> (and "
+            "the matching \"en\") declarations naming each version's "
+            "own URL."))
+
+    # FR-<ROLE> — each key page's French counterpart must resolve
+    role_labels = {"home": ("FR-HOME", "high"),
+                   "contact": ("FR-CONTACT", "medium"),
+                   "privacy": ("FR-PRIVACY", "medium")}
+    for attempt in attempts:
+        role = attempt["role"]
+        rule_id, severity = role_labels[role]
+        if not attempt["ok"]:
+            add(make_finding(
+                "francais", rule_id, severity,
+                f"French version · {role} page",
+                f"The French counterpart of the {role} page did not "
+                "resolve as an HTML page in this check "
+                f"({attempt.get('error') or 'not fetched'}). Either "
+                "the French version of this page does not exist, or "
+                "it lives at an address this check did not guess — "
+                "the conventional /fr/ address was tried.",
+                attempt["url"],
+                f"Publish the French {role} page, or point the "
+                "language toggle at the address where it actually "
+                "lives."))
+        elif attempt.get("lang") is not None \
+                and not attempt["lang"].lower().startswith("fr"):
+            add(make_finding(
+                "francais", rule_id + "-LANG", "medium",
+                f"French version · {role} page language",
+                f"The French address for the {role} page resolves, "
+                f"but the page declares lang=\"{attempt['lang']}\" "
+                "instead of French. Assistive technology and search "
+                "engines will treat it as an English page, which "
+                "usually means the English page was copied to the "
+                "French address without being declared (or written) "
+                "in French.",
+                attempt["url"],
+                "Declare lang=\"fr\" on the French page and make "
+                "sure its content is the French version."))
+
+    stats = {
+        "pages_scanned": len(pages),
+        "french_entry_found": entry_found,
+        "hreflang_fr_found": hreflang_fr,
+        "attempts": len(attempts),
+        "attempts_ok": sum(1 for a in attempts if a["ok"]),
+    }
+    return findings, stats
 
 
 # ---------------------------------------------------------------------------
