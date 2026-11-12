@@ -15,6 +15,14 @@ Canadian SMB compliance platform, Phase 1 modules:
     a cookie consent mechanism, and a French privacy policy.
   * Français Check — whether a real French version of the site exists
     and its key pages (home, contact, privacy) resolve in French.
+  * AODA Complete the Filing — on top of the AODA scan: a remediation
+    tracker whose "resolved" status comes only from re-scan
+    verification, an owner-answered checklist for the non-website
+    IASR standards, a combined Filing Pack, and a publish-ready
+    accessibility statement generator. Checklist answers are the
+    organization's own statements and are labelled as such everywhere;
+    the compliance report itself is filed by the organization on the
+    Ontario portal and certified by a senior officer.
 
 Stack: Python standard library only — http.server, server-rendered
 HTML with inline CSS, no JavaScript frameworks, no external requests.
@@ -47,6 +55,7 @@ DATA_DIR = os.path.join(APP_DIR, "data")
 FOUNDING_PATH = os.path.join(DATA_DIR, "founding.json")
 SCANS_PATH = os.path.join(DATA_DIR, "scans.json")
 VAULT_PATH = os.path.join(DATA_DIR, "vault.json")
+CHECKLISTS_PATH = os.path.join(DATA_DIR, "checklists.json")
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8790"))
@@ -160,6 +169,7 @@ def page(title, body):
   <a href="/">NorthCheck</a>
   <nav>
     <a href="/scan">AODA scan</a>
+    <a href="/filing">Complete the Filing</a>
     <a href="/postcheck">PostCheck</a>
     <a href="/loi25">Loi25 Kit</a>
     <a href="/francais">Français Check</a>
@@ -209,6 +219,18 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   a dated evidence pack for the December 31, 2026 filing.</p>
   <p><strong>Founding price: $149</strong> per evidence pack ·
   <strong>$39/month</strong> monitoring with re-scan alerts.</p>
+  <p><strong>Complete the Filing Pack</strong> — the report covers
+  every part of the Integrated Accessibility Standards Regulation,
+  not just the website, and a senior officer has to certify it. This
+  fuller offer adds a remediation tracker (a finding counts as fixed
+  only when a re-scan verifies it is gone — never on a say-so), an
+  owner-answered checklist for the non-website standards, one Filing
+  Pack that combines the website evidence with those answers and the
+  remaining gaps, and a publish-ready accessibility statement for
+  your site. <strong>Founding price: $249</strong> for the Complete
+  Filing Pack.</p>
+  <a class="btn" href="/filing">Complete the Filing checklist</a>
+  <a class="btn" href="/#founding">Join the founding list</a><br>
   <a class="btn" href="/scan">Scan my website</a>
   <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149</a>
   <a class="btn" href="https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01">Add monitoring — $39/month</a>
@@ -354,6 +376,24 @@ def crawl(start_url):
     return fetched, errors
 
 
+def site_key(url):
+    """Key tying together every scan / checklist for the same site.
+
+    The normalised start URL as entered — two scans of the same site
+    start from the same address, so this is also the re-scan key.
+    """
+    return nc._norm_page_url(url)
+
+
+def previous_aoda_scan(key, scans):
+    """Most recent stored AODA scan for this site key, else None."""
+    for record in reversed(scans):
+        if record.get("module") == "aoda" \
+                and site_key(record.get("start_url", "")) == key:
+            return record
+    return None
+
+
 def run_scan(start_url):
     pages, errors = crawl(start_url)
     page_results = []
@@ -374,6 +414,16 @@ def run_scan(start_url):
         "total_findings": sum(len(pr["findings"]) for pr in page_results),
     }
     scans = load_list(SCANS_PATH)
+    previous = previous_aoda_scan(site_key(start_url), scans)
+    if previous is not None:
+        # Remediation tracker: "resolved" is earned only here, by the
+        # new scan no longer reporting the finding — never by a click.
+        record["comparison"] = {
+            "previous_scan_id": previous["id"],
+            "previous_timestamp": previous["timestamp"],
+            **nc.compare_scan_pages(previous["pages"],
+                                    page_results),
+        }
     scans.append(record)
     _save(SCANS_PATH, scans)
     return record
@@ -422,6 +472,54 @@ dated evidence pack for the December 31, 2026 Ontario filing.</p>
     return page("AODA website scan", body)
 
 
+def _comparison_entry_list(entries):
+    if not entries:
+        return "<p>None.</p>"
+    items = "".join(
+        f"<li><span class=\"sev sev-{escape(e['finding']['severity'])}\">"
+        f"{escape(e['finding']['severity'])}</span> "
+        f"<strong>{escape(e['finding']['rule_id'])}</strong> — "
+        f"{escape(e['finding']['category'])}<br>"
+        f"<span class=\"small\">Page: {escape(e['page_url'])}</span></li>"
+        for e in entries)
+    return f"<ul>{items}</ul>"
+
+
+def comparison_html(record):
+    """Remediation-tracker card: this scan vs the previous one.
+
+    Status vocabulary is deliberate: "Verified resolved by re-scan"
+    (the new scan no longer reports the finding) is the only fixed
+    status NorthCheck shows. There is no mark-as-fixed button — an
+    owner's say-so is never presented as verification.
+    """
+    comp = record.get("comparison")
+    if not comp:
+        return ""
+    c = comp["counts"]
+    return f"""
+<div class="card">
+  <h2>Remediation tracker — compared with the previous scan</h2>
+  <p>Previous scan: {escape(comp['previous_timestamp'])} ·
+  <strong>{c['resolved']} verified resolved by re-scan</strong> ·
+  {c['still_open']} still open · {c['new']} new ·
+  {c['not_rechecked']} on pages this scan did not crawl</p>
+  <p class="small">A finding counts as resolved only when a re-scan
+  no longer reports it. NorthCheck does not offer a "mark as fixed"
+  button: an owner's say-so is not verification, and only the
+  re-scan result above is shown as resolved.</p>
+  <h3>Verified resolved by re-scan ({c['resolved']})</h3>
+  {_comparison_entry_list(comp['resolved'])}
+  <h3>Still open ({c['still_open']})</h3>
+  {_comparison_entry_list(comp['still_open'])}
+  <h3>New in this scan ({c['new']})</h3>
+  {_comparison_entry_list(comp['new'])}
+  <h3>Not re-checked — page not crawled this time
+      ({c['not_rechecked']})</h3>
+  {_comparison_entry_list(comp['not_rechecked'])}
+</div>"""
+
+
 def scan_results_page(record):
     sections = []
     for pr in record["pages"]:
@@ -450,6 +548,7 @@ def scan_results_page(record):
 Scanned: {escape(record['timestamp'])} · {len(record['pages'])} page(s) ·
 <strong>{record['total_findings']} issues to review in total</strong></p>
 <p><a class="btn" href="/pack/{record['id']}">Download the evidence pack (HTML)</a></p>
+{comparison_html(record)}
 {''.join(sections)}
 {errors_html}
 <div class="card">
@@ -825,6 +924,381 @@ def francais_pack_html(record):
 
 
 # ---------------------------------------------------------------------------
+# AODA Complete the Filing — checklist, Filing Pack, statement
+# ---------------------------------------------------------------------------
+
+OWNER_STATED_LINE = ("Checklist answers below are the organization's "
+                     "own statements, recorded as given. NorthCheck "
+                     "has not verified them.")
+
+
+def load_checklists():
+    return load_list(CHECKLISTS_PATH)
+
+
+def find_checklist(checklist_id):
+    return next((c for c in load_checklists()
+                 if c.get("id") == checklist_id), None)
+
+
+def latest_checklist_for_site(key):
+    for record in reversed(load_checklists()):
+        if record.get("site_key") == key:
+            return record
+    return None
+
+
+def latest_aoda_for_site(key):
+    return previous_aoda_scan(key, load_list(SCANS_PATH))
+
+
+def filing_form_page(prefill=None, error=None):
+    prefill = prefill or {}
+    answers = prefill.get("answers", {})
+    err = f'<div class="notice">{escape(error)}</div>' if error else ""
+    sections = []
+    for section in nc.FILING_CHECKLIST:
+        radios = []
+        for item in section["items"]:
+            options = []
+            for status in nc.CHECKLIST_STATUSES:
+                checked = " checked" if answers.get(item["id"]) == status \
+                    else ""
+                label = nc.CHECKLIST_STATUS_LABELS[status].replace(
+                    " (owner stated)", "")
+                options.append(
+                    f'<label style="display:inline-block;font-weight:400;'
+                    f'margin:0 14px 0 0">'
+                    f'<input type="radio" name="item_{item["id"]}" '
+                    f'value="{status}"{checked}> {escape(label)}</label>')
+            radios.append(f"""
+<div class="finding">
+  <p><strong>{escape(item['id'])}</strong> — {escape(item['text'])}</p>
+  <p>{''.join(options)}</p>
+</div>""")
+        sections.append(f"""
+<div class="card">
+  <h2>{escape(section['standard'])}</h2>
+  <p class="small">{escape(section['applies'])}</p>
+  {''.join(radios)}
+</div>""")
+    body = f"""
+<h1>Complete the Filing — checklist for the rest of the report</h1>
+<p>The December 31, 2026 accessibility compliance report asks about
+every part of the Integrated Accessibility Standards Regulation — the
+General requirements, Information and Communications, Employment,
+Transportation (only if you provide transportation services), the
+Design of Public Spaces, and Customer Service — and it must be
+certified by a senior officer. The website scan covers the web part.
+This checklist covers the rest.</p>
+<div class="deadline">
+  <strong>These answers are your organization's own statements.</strong>
+  NorthCheck records them as given and does not verify them. They are
+  labelled "owner stated" everywhere they appear, including in the
+  Filing Pack. The report itself is filed by your organization on the
+  Ontario government portal — NorthCheck prepares the evidence, it
+  does not file or certify.
+</div>
+{err}
+<form method="post" action="/filing">
+<div class="card">
+  <label for="org_name">Organization name</label>
+  <input type="text" id="org_name" name="org_name" required
+         value="{escape(prefill.get('org_name', ''), quote=True)}"
+         placeholder="Maple Street Bakery Inc.">
+  <label for="website">Website (the address you scanned)</label>
+  <input type="url" id="website" name="website" required
+         value="{escape(prefill.get('website', ''), quote=True)}"
+         placeholder="https://yourbusiness.ca">
+</div>
+{''.join(sections)}
+<button type="submit">Save the checklist</button>
+</form>
+<p class="small">{HONESTY_LINE}</p>
+"""
+    return page("Complete the Filing — checklist", body)
+
+
+def _checklist_answers_html(answers):
+    """Checklist answers grouped by standard, owner-stated labelled."""
+    out = []
+    for section in nc.FILING_CHECKLIST:
+        rows = []
+        for item in section["items"]:
+            status = answers.get(item["id"])
+            if status not in nc.CHECKLIST_STATUSES:
+                status = "unanswered"
+            rows.append(f"""
+<tr>
+  <td><strong>{escape(item['id'])}</strong></td>
+  <td>{escape(item['text'])}</td>
+  <td>{escape(nc.CHECKLIST_STATUS_LABELS[status])}</td>
+</tr>""")
+        out.append(f"""
+<h3>{escape(section['standard'])}</h3>
+<table>
+  <tr><th>Item</th><th>Statement</th><th>Owner's answer</th></tr>
+  {''.join(rows)}
+</table>""")
+    return "\n".join(out)
+
+
+def _website_status_html(scan, detailed=False):
+    """Website evidence block shared by the view page and the pack."""
+    if scan is None:
+        return ("<p>No AODA website scan is on file for this site yet. "
+                "Run the <a href=\"/scan\">website scan</a> so the "
+                "Filing Pack can include the website evidence.</p>")
+    counts = nc.count_by_severity(
+        [f for pr in scan["pages"] for f in pr["findings"]])
+    counts_line = " · ".join(
+        f"{sev} {counts[sev]}" for sev in ("high", "medium", "low",
+                                           "info"))
+    comp = scan.get("comparison")
+    comp_html = ""
+    if comp:
+        c = comp["counts"]
+        comp_html = f"""
+<p><strong>Remediation status (verified by re-scan only):</strong>
+{c['resolved']} verified resolved since the previous scan
+({escape(comp['previous_timestamp'])}), {c['still_open']} still open,
+{c['new']} new, {c['not_rechecked']} on pages not re-crawled.</p>"""
+    findings_block = ""
+    if detailed:
+        sections = []
+        for pr in scan["pages"]:
+            sections.append(f"""
+<h3>Page: {escape(pr['url'])}</h3>
+{findings_html(pr['findings'])}""")
+        findings_block = "\n".join(sections)
+    return f"""
+<p>Latest scan: {escape(scan['timestamp'])} · {len(scan['pages'])}
+page(s) · <strong>{scan['total_findings']} issues to review</strong>
+({counts_line})</p>
+{comp_html}
+{findings_block}"""
+
+
+def filing_view_page(record):
+    scan = latest_aoda_for_site(record["site_key"])
+    summary = nc.checklist_summary(record["answers"])
+    t = summary["totals"]
+    std_rows = "".join(
+        f"<tr><td>{escape(r['standard'])}</td>"
+        f"<td>{r['compliant']}</td><td>{r['in_progress']}</td>"
+        f"<td>{r['not_started']}</td><td>{r['not_applicable']}</td>"
+        f"<td>{r['unanswered']}</td></tr>"
+        for r in summary["per_standard"])
+    gaps = nc.filing_gaps(record["answers"],
+                          comparison=(scan or {}).get("comparison"),
+                          latest_total=(scan or {}).get(
+                              "total_findings"))
+    gaps_html = "".join(f"<li>{escape(g)}</li>" for g in gaps) \
+        or "<li>No gaps recorded from the scan or the checklist.</li>"
+    body = f"""
+<h1>Filing Pack — {escape(record['org_name'])}</h1>
+<p>Website: <strong>{escape(record['website'])}</strong><br>
+Checklist saved: {escape(record['timestamp'])}</p>
+<p><a class="btn" href="/filing/pack/{record['id']}">Download the Filing Pack (HTML)</a>
+<a class="btn" href="/filing/statement/{record['id']}">Download the accessibility statement (HTML)</a></p>
+
+<div class="card">
+  <h2>Before you file — read this</h2>
+  <p>{escape(nc.FILING_CERTIFICATION_NOTE)}</p>
+</div>
+
+<div class="card">
+  <h2>Website evidence (from the AODA scan)</h2>
+  {_website_status_html(scan)}
+</div>
+
+<div class="card">
+  <h2>Checklist answers (owner stated)</h2>
+  <p class="small">{OWNER_STATED_LINE}</p>
+  <p>Compliant {t['compliant']} · In progress {t['in_progress']} ·
+  Not started {t['not_started']} · Not applicable
+  {t['not_applicable']} · Not answered {t['unanswered']} of
+  {t['total']} items.</p>
+  <table>
+    <tr><th>Standard</th><th>Compliant</th><th>In progress</th>
+        <th>Not started</th><th>Not applicable</th>
+        <th>Not answered</th></tr>
+    {std_rows}
+  </table>
+</div>
+
+<div class="card">
+  <h2>Remaining gaps</h2>
+  <ul>{gaps_html}</ul>
+</div>
+
+<p class="small">{nc.DRAFT_STAMP}</p>
+"""
+    return page("Filing Pack", body)
+
+
+def filing_pack_html(record):
+    scan = latest_aoda_for_site(record["site_key"])
+    gaps = nc.filing_gaps(record["answers"],
+                          comparison=(scan or {}).get("comparison"),
+                          latest_total=(scan or {}).get(
+                              "total_findings"))
+    gaps_html = "".join(f"<li>{escape(g)}</li>" for g in gaps) \
+        or "<li>No gaps recorded from the scan or the checklist.</li>"
+    date_line = record["timestamp"][:10]
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NorthCheck Filing Pack — AODA Complete the Filing</title>
+<style>{CSS}</style>
+</head>
+<body>
+<main>
+<h1>NorthCheck Filing Pack — AODA Complete the Filing</h1>
+<p><strong>{escape(nc.DRAFT_STAMP, quote=False)}</strong></p>
+<ul>
+  <li><strong>Organization:</strong> {escape(record['org_name'])}</li>
+  <li><strong>Website:</strong> {escape(record['website'])}</li>
+  <li><strong>Pack prepared:</strong> {escape(date_line)}</li>
+  <li><strong>Filing deadline:</strong> December 31, 2026 (Ontario
+  accessibility compliance report, organizations with 20+ employees)</li>
+</ul>
+
+<h2>Before you file — certification</h2>
+<div class="deadline">
+  <p>{escape(nc.FILING_CERTIFICATION_NOTE)}</p>
+</div>
+
+<h2>1. Website findings and status (scan evidence)</h2>
+{_website_status_html(scan, detailed=True)}
+
+<h2>2. Checklist answers by standard (owner stated)</h2>
+<p>{OWNER_STATED_LINE}</p>
+{_checklist_answers_html(record['answers'])}
+
+<h2>3. Remaining gaps</h2>
+<ul>{gaps_html}</ul>
+
+<h2>Honesty note</h2>
+<p>Website findings are issues to review, found by deterministic
+checks — not determinations of compliance or non-compliance, and an
+empty findings list would not be a guarantee of compliance either.
+Checklist answers are the organization's own statements and have not
+been verified by NorthCheck. The signing officer reviews all of the
+evidence and makes the call.</p>
+<hr>
+<p class="small">Generated by NorthCheck. {HONESTY_LINE}</p>
+</main>
+</body>
+</html>
+"""
+
+
+def statement_html(record):
+    """Publish-ready accessibility statement for the org's own site.
+
+    Every sentence is built from the inputs on file (org name, site,
+    scan summary, checklist state). Anything only the organization
+    can supply is a bracketed placeholder, marked as such — nothing
+    is invented on the organization's behalf.
+    """
+    scan = latest_aoda_for_site(record["site_key"])
+    today = datetime.date.today().isoformat()
+    if scan is not None:
+        scan_date = scan["timestamp"][:10]
+        if scan["total_findings"]:
+            scan_sentence = (
+                f"Our most recent automated website check, run on "
+                f"{scan_date} over {len(scan['pages'])} page(s) of "
+                f"this site, found {scan['total_findings']} issue(s) "
+                f"for us to review against WCAG 2.0. We are working "
+                f"through them. Automated checks cover only part of "
+                f"what accessibility standards ask for, so a check "
+                f"that finds nothing would not by itself mean the "
+                f"site presents no barriers.")
+        else:
+            scan_sentence = (
+                f"Our most recent automated website check, run on "
+                f"{scan_date} over {len(scan['pages'])} page(s) of "
+                f"this site, found no issues matched by those checks. "
+                f"Automated checks cover only part of what "
+                f"accessibility standards ask for, so we continue to "
+                f"review the site and welcome reports of any barrier.")
+    else:
+        scan_sentence = (
+            "[WEBSITE CHECK — TO BE COMPLETED BY THE ORGANIZATION: "
+            "no automated website check from NorthCheck is on file "
+            "for this site yet. Delete this note once a check has "
+            "been run, or replace it with your own summary.]")
+    summary = nc.checklist_summary(record["answers"])
+    t = summary["totals"]
+    if t["unanswered"] == 0 and t["total"]:
+        checklist_sentence = (
+            f"We have reviewed our practices against the areas of "
+            f"Ontario's accessibility standards (general "
+            f"requirements, information and communications, customer "
+            f"service, employment, and — where they apply to us — "
+            f"transportation and the design of public spaces) and we "
+            f"track our progress against them internally.")
+    else:
+        checklist_sentence = (
+            f"We are reviewing our practices against the areas of "
+            f"Ontario's accessibility standards (general "
+            f"requirements, information and communications, customer "
+            f"service, employment, and — where they apply to us — "
+            f"transportation and the design of public spaces). "
+            f"[REVIEW STATUS — TO BE COMPLETED BY THE ORGANIZATION: "
+            f"{t['unanswered']} of {t['total']} review items have "
+            f"not been answered yet. Update this sentence when the "
+            f"review is complete.]")
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Accessibility Statement — {escape(record['org_name'])}</title>
+<style>{CSS}</style>
+</head>
+<body>
+<main>
+<p class="small">Prepared by NorthCheck for
+{escape(record['org_name'])} on {today}. Text in [brackets] is a
+placeholder only the organization can complete — review and finish
+every bracketed item before publishing. This statement was generated
+from the organization's recorded scan results and its own checklist
+answers; it is not a certification.</p>
+<hr>
+<h1>Accessibility Statement</h1>
+<p><strong>{escape(record['org_name'])}</strong> is committed to
+treating people with disabilities in ways that preserve their
+dignity and independence, and to meeting the requirements of the
+Accessibility for Ontarians with Disabilities Act (AODA) and the
+Integrated Accessibility Standards Regulation.</p>
+<p>This statement covers our website, {escape(record['website'])}.</p>
+<h2>Our website</h2>
+<p>{escape(scan_sentence)}</p>
+<h2>Beyond the website</h2>
+<p>{escape(checklist_sentence)}</p>
+<h2>Feedback</h2>
+<p>We welcome feedback on the accessibility of our services and of
+this website. To give feedback, request information in an alternate
+format, or ask for communication supports, contact us:</p>
+<ul>
+  <li>[FEEDBACK CONTACT — TO BE COMPLETED BY THE ORGANIZATION:
+  name or role, email address, phone number]</li>
+</ul>
+<p>We will respond to accessibility feedback in a format that is
+accessible to the person providing it.</p>
+<h2>Review</h2>
+<p>This statement was prepared on {today} and will be reviewed when
+our practices or this website change.</p>
+</main>
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
 # PostCheck
 # ---------------------------------------------------------------------------
 
@@ -1022,6 +1496,44 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, landing_page(joined=joined))
         elif path == "/scan":
             self._send(200, scan_form_page())
+        elif path == "/filing":
+            prefill = {}
+            site = (query.get("site", [""])[0] or "").strip()
+            if site:
+                existing = latest_checklist_for_site(site_key(site))
+                prefill = {"website": site}
+                if existing:
+                    prefill["org_name"] = existing["org_name"]
+                    prefill["answers"] = existing["answers"]
+            self._send(200, filing_form_page(prefill=prefill))
+        elif path.startswith("/filing/view/"):
+            record = find_checklist(path[len("/filing/view/"):])
+            if record is None:
+                self._not_found()
+            else:
+                self._send(200, filing_view_page(record))
+        elif path.startswith("/filing/pack/"):
+            record = find_checklist(path[len("/filing/pack/"):])
+            if record is None:
+                self._not_found()
+            else:
+                self._send(
+                    200, filing_pack_html(record),
+                    extra_headers={
+                        "Content-Disposition":
+                            'attachment; filename="northcheck_filing_'
+                            f'pack_{record["id"]}.html"'})
+        elif path.startswith("/filing/statement/"):
+            record = find_checklist(path[len("/filing/statement/"):])
+            if record is None:
+                self._not_found()
+            else:
+                self._send(
+                    200, statement_html(record),
+                    extra_headers={
+                        "Content-Disposition":
+                            'attachment; filename="accessibility_'
+                            f'statement_{record["id"]}.html"'})
         elif path == "/loi25":
             self._send(200, _site_form_page("loi25"))
         elif path == "/francais":
@@ -1057,7 +1569,35 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
         form = self._form()
-        if path == "/founding":
+        if path == "/filing":
+            org_name = (form.get("org_name") or "").strip()
+            website = (form.get("website") or "").strip()
+            if not org_name or not website.startswith(
+                    ("http://", "https://")):
+                self._send(400, filing_form_page(
+                    error="Enter the organization name and a full "
+                          "website URL starting with http:// or "
+                          "https://"))
+                return
+            answers = {}
+            for _section, item in nc.checklist_items():
+                value = form.get(f"item_{item['id']}")
+                if value in nc.CHECKLIST_STATUSES:
+                    answers[item["id"]] = value
+            record = {
+                "id": uuid.uuid4().hex[:12],
+                "org_name": org_name,
+                "website": website,
+                "site_key": site_key(website),
+                "answers": answers,
+                "timestamp": datetime.datetime.now().isoformat(
+                    timespec="seconds"),
+            }
+            entries = load_checklists()
+            entries.append(record)
+            _save(CHECKLISTS_PATH, entries)
+            self._redirect(f"/filing/view/{record['id']}")
+        elif path == "/founding":
             email = (form.get("email") or "").strip()
             if "@" not in email or "." not in email:
                 self._send(400, page(

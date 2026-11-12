@@ -13,6 +13,11 @@ ports, then asserts:
   * Français Check: engine findings (bad 4, good 0, mid 1, plus the
     resolved-but-English case), the /francais form and scan flow, and
     its evidence pack.
+  * AODA Complete the Filing: re-scan comparison correctness on
+    fabricated pages (improving site, dropped page, duplicate
+    findings), the /filing checklist flow end to end, the Filing Pack
+    (website findings + owner-stated answers + certification note),
+    and the accessibility statement with marked placeholders.
 
 The app's data/ directory is backed up first and restored afterwards,
 so founding signups, scans and vault entries from real use are never
@@ -169,9 +174,39 @@ MID_FR_HOME = """<!DOCTYPE html>
 </html>
 """
 
+# Complete the Filing fixtures: one page whose problems partly get
+# fixed between scans (v1 -> v2), used to prove the re-scan comparison.
+# v1: no lang, empty title, img without alt  -> LANG + TITLE + IMG-ALT
+# v2: lang + title fixed, img untouched      -> IMG-ALT only
+IMPROVE_V1 = """<!DOCTYPE html>
+<html>
+<head><title></title></head>
+<body>
+<h1>Improve Bakery</h1>
+<img src="images/store.jpg">
+</body>
+</html>
+"""
+IMPROVE_V2 = """<!DOCTYPE html>
+<html lang="en">
+<head><title>Improve Bakery</title></head>
+<body>
+<h1>Improve Bakery</h1>
+<img src="images/store.jpg">
+</body>
+</html>
+"""
+IMPROVE_EXTRA = """<!DOCTYPE html>
+<html lang="en">
+<head><title>Extra</title></head>
+<body><h1>Extra</h1><a href="/more">click here</a></body>
+</html>
+"""
+
 FIXTURES = {
     "/bad/": BAD_HOME,
     "/bad/contact": BAD_CONTACT,
+    "/improve/": IMPROVE_V1,
     "/good/": GOOD_HOME,
     "/good/contact": GOOD_CONTACT,
     "/good/privacy": GOOD_PRIVACY,
@@ -232,6 +267,13 @@ def post(path, data):
 def last_scan_record():
     import json as _json
     with open(os.path.join(DATA_DIR, "scans.json"),
+              encoding="utf-8") as fh:
+        return _json.load(fh)[-1]
+
+
+def last_checklist_record():
+    import json as _json
+    with open(os.path.join(DATA_DIR, "checklists.json"),
               encoding="utf-8") as fh:
         return _json.load(fh)[-1]
 
@@ -337,6 +379,88 @@ def engine_francais_checks():
           f"got {[(x['rule_id']) for x in f]}")
 
 
+def _pages(url, html_text):
+    findings, _ = nc.run_aoda_checks(html_text)
+    return [{"url": url, "findings": findings}]
+
+
+def engine_filing_checks():
+    print("Engine — AODA Complete the Filing (comparison + checklist)")
+    prev = _pages(FIX + "/improve/", IMPROVE_V1) \
+        + _pages(FIX + "/improve/extra", IMPROVE_EXTRA)
+    curr = _pages(FIX + "/improve/", IMPROVE_V2)
+    comp = nc.compare_scan_pages(prev, curr)
+    c = comp["counts"]
+    check("comparison: 2 resolved (LANG + TITLE)",
+          c["resolved"] == 2
+          and {e["finding"]["rule_id"] for e in comp["resolved"]}
+          == {"AODA-LANG", "AODA-TITLE"}, str(c))
+    check("comparison: 1 still open (IMG-ALT)",
+          c["still_open"] == 1
+          and comp["still_open"][0]["finding"]["rule_id"]
+          == "AODA-IMG-ALT", str(c))
+    check("comparison: 0 new", c["new"] == 0, str(c))
+    check("comparison: dropped page's finding is not_rechecked, "
+          "not resolved",
+          c["not_rechecked"] == 1
+          and comp["not_rechecked"][0]["finding"]["rule_id"]
+          == "AODA-LINK-GENERIC", str(c))
+
+    two_imgs = ('<html lang="en"><head><title>T</title></head><body>'
+                '<img src="a.jpg"><img src="b.jpg"></body></html>')
+    one_img = ('<html lang="en"><head><title>T</title></head><body>'
+               '<img src="a.jpg"></body></html>')
+    comp = nc.compare_scan_pages(_pages(FIX + "/m/", two_imgs),
+                                 _pages(FIX + "/m/", one_img))
+    c = comp["counts"]
+    check("comparison counts duplicates with multiplicity "
+          "(2 -> 1 = 1 resolved, 1 still open)",
+          c["resolved"] == 1 and c["still_open"] == 1
+          and c["new"] == 0, str(c))
+
+    comp = nc.compare_scan_pages(curr, prev)
+    c = comp["counts"]
+    check("comparison reversed: regressed items come back as new "
+          "(LANG + TITLE + the extra page's LINK-GENERIC)",
+          c["new"] == 3 and c["resolved"] == 0
+          and c["still_open"] == 1, str(c))
+
+    answers = {"GEN-POLICY": "compliant", "GEN-PLAN": "in_progress",
+               "CS-DISRUPTION": "not_started",
+               "TRANS-FEATURES": "not_applicable"}
+    summary = nc.checklist_summary(answers)
+    t = summary["totals"]
+    total_items = sum(len(s["items"]) for s in nc.FILING_CHECKLIST)
+    check("checklist summary totals match the checklist size",
+          t["total"] == total_items
+          and t["compliant"] == 1 and t["in_progress"] == 1
+          and t["not_started"] == 1 and t["not_applicable"] == 1
+          and t["unanswered"] == total_items - 4, str(t))
+    check("checklist covers the six IASR areas from the research",
+          [s["standard"] for s in nc.FILING_CHECKLIST][0]
+          == "General requirements"
+          and any(s["standard"].startswith("Customer Service")
+                  for s in nc.FILING_CHECKLIST)
+          and any(s["standard"].startswith("Employment")
+                  for s in nc.FILING_CHECKLIST)
+          and any(s["standard"].startswith("Transportation")
+                  for s in nc.FILING_CHECKLIST)
+          and any(s["standard"].startswith("Design of Public")
+                  for s in nc.FILING_CHECKLIST),
+          str([s["standard"] for s in nc.FILING_CHECKLIST]))
+    gaps = nc.filing_gaps(answers, comparison=nc.compare_scan_pages(
+        prev, curr))
+    check("filing gaps mention still-open website findings and "
+          "owner-stated checklist gaps",
+          any("still open" in g for g in gaps)
+          and any("owner stated" in g for g in gaps), str(gaps))
+    check("certification note names senior officer + Ontario portal "
+          "+ not verified",
+          "senior officer" in nc.FILING_CERTIFICATION_NOTE
+          and "Ontario" in nc.FILING_CERTIFICATION_NOTE
+          and "has not verified" in nc.FILING_CERTIFICATION_NOTE)
+
+
 def app_baseline_checks():
     print("App baseline (pre-existing pages and flows)")
     s, body = get("/")
@@ -422,6 +546,95 @@ def app_new_module_checks():
           s == 200 and "1 issues to review in total" in body)
 
 
+def app_filing_checks():
+    print("App — AODA Complete the Filing")
+    s, body = get("/")
+    check("landing presents Complete Filing Pack at $249 founding",
+          s == 200 and "Complete the Filing Pack" in body
+          and "Founding price: $249" in body)
+    s, body = get("/filing")
+    check("/filing 200 with checklist form",
+          s == 200 and 'name="org_name"' in body
+          and 'name="item_GEN-POLICY"' in body
+          and "own statements" in body)
+
+    # First scan of the improving site: 3 findings, no comparison yet.
+    s, body = post("/scan", {"url": FIX + "/improve/"})
+    check("improve v1 scan: 3 issues in total, no tracker card",
+          s == 200 and "3 issues to review in total" in body
+          and "Remediation tracker" not in body, f"status {s}")
+    rec = last_scan_record()
+    check("improve v1 record has no comparison",
+          "comparison" not in rec)
+
+    # The site fixes lang + title; the img finding must stay open.
+    FIXTURES["/improve/"] = IMPROVE_V2
+    try:
+        s, body = post("/scan", {"url": FIX + "/improve/"})
+        check("improve v2 scan: 1 issue in total with tracker card",
+              s == 200 and "1 issues to review in total" in body
+              and "Remediation tracker" in body, f"status {s}")
+        check("results page shows 2 verified resolved by re-scan",
+              "2 verified resolved by re-scan" in body)
+        check("results page shows still open / new counts",
+              "1 still open" in body and "0 new" in body)
+        check("results page keeps resolved distinct from say-so",
+              "not verification" in body)
+        rec = last_scan_record()
+        comp = rec.get("comparison", {})
+        check("stored comparison counts resolved 2 / open 1 / new 0",
+              comp.get("counts", {}).get("resolved") == 2
+              and comp.get("counts", {}).get("still_open") == 1
+              and comp.get("counts", {}).get("new") == 0,
+              str(comp.get("counts")))
+    finally:
+        FIXTURES["/improve/"] = IMPROVE_V1
+
+    # Checklist flow end to end.
+    s, body = post("/filing", {
+        "org_name": "Improve Bakery Inc.",
+        "website": FIX + "/improve/",
+        "item_GEN-POLICY": "compliant",
+        "item_GEN-PLAN": "in_progress",
+        "item_CS-DISRUPTION": "not_started",
+        "item_TRANS-FEATURES": "not_applicable"})
+    check("checklist POST lands on the Filing Pack view",
+          s == 200 and "Filing Pack — Improve Bakery Inc." in body,
+          f"status {s}")
+    check("view page carries the certification note",
+          "certified by a senior officer" in body
+          and "does not file the report" in body)
+    rec = last_checklist_record()
+    check("checklist stored with 4 owner answers",
+          len(rec.get("answers", {})) == 4, str(rec.get("answers")))
+
+    s, body = get(f"/filing/pack/{rec['id']}")
+    check("Filing Pack 200 with DRAFT stamp",
+          s == 200 and "DRAFT" in body and "not legal advice" in body)
+    check("Filing Pack includes the website findings",
+          "AODA-IMG-ALT" in body and "Website findings" in body)
+    check("Filing Pack labels checklist answers owner stated",
+          "Compliant (owner stated)" in body
+          and "has not verified them" in body)
+    check("Filing Pack carries the certification note + gaps",
+          "must be certified by a senior officer" in body
+          and "Remaining gaps" in body)
+
+    s, body = get(f"/filing/statement/{rec['id']}")
+    check("accessibility statement 200 with org name",
+          s == 200 and "Accessibility Statement" in body
+          and "Improve Bakery Inc." in body)
+    check("statement carries the feedback placeholder, marked",
+          "[FEEDBACK CONTACT — TO BE COMPLETED BY THE ORGANIZATION"
+          in body and "placeholder" in body)
+    check("statement reflects the real scan (1 issue to review)",
+          "found 1 issue(s)" in body)
+
+    s, body = post("/filing", {"org_name": "X", "website": "nope"})
+    check("checklist POST rejects a URL without scheme (400)",
+          s == 400)
+
+
 def main():
     backup_dir = DATA_DIR + ".check-backup"
     if os.path.exists(backup_dir):
@@ -444,8 +657,10 @@ def main():
         engine_baseline_checks()
         engine_loi25_checks()
         engine_francais_checks()
+        engine_filing_checks()
         app_baseline_checks()
         app_new_module_checks()
+        app_filing_checks()
     finally:
         app.terminate()
         fix.shutdown()

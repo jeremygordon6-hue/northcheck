@@ -17,6 +17,16 @@ driven by the app's crawler):
                 named privacy officer, cookie consent, French policy).
   * francais  : Français Check — a real French version exists and its
                 key pages (home, contact, privacy) resolve in French.
+  * filing    : AODA Complete the Filing — re-scan comparison
+                (compare_scan_pages: a finding counts as resolved only
+                when a later scan no longer reports it), an
+                owner-answered checklist for the non-website IASR
+                standards (FILING_CHECKLIST — answers are the
+                organization's own statements, never verified), and the
+                summary/gap helpers the Filing Pack is built from. The
+                compliance report itself is filed by the organization
+                on the Ontario portal and certified by a senior
+                officer; NorthCheck prepares evidence only.
 
 The original two CLI modules:
 
@@ -1127,6 +1137,440 @@ def run_francais_checks(pages, attempts):
         "attempts_ok": sum(1 for a in attempts if a["ok"]),
     }
     return findings, stats
+
+
+# ---------------------------------------------------------------------------
+# AODA Complete the Filing — re-scan comparison (remediation tracker)
+# ---------------------------------------------------------------------------
+#
+# The December 31, 2026 accessibility compliance report covers all parts
+# of the Integrated Accessibility Standards Regulation (IASR) and must
+# be certified by a senior officer. The website scan evidences only the
+# web-content part, so Complete the Filing adds: (1) this re-scan
+# comparison, which is the only source of "fixed" status — a finding is
+# resolved only when a later scan no longer reports it; (2) an
+# owner-answered checklist for the non-website standards; and (3) the
+# helpers that summarise both for the Filing Pack.
+
+from collections import Counter
+
+
+def _norm_page_url(url):
+    """Normalise a crawled page URL for cross-scan comparison."""
+    url = urllib.parse.urldefrag(url or "")[0]
+    parts = urllib.parse.urlsplit(url)
+    path = parts.path
+    if len(path) > 1 and path.endswith("/"):
+        path = path.rstrip("/")
+    return urllib.parse.urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), path,
+         parts.query, ""))
+
+
+def finding_key(page_url, finding):
+    """Identity of one finding on one page across scans."""
+    return (_norm_page_url(page_url), finding["rule_id"],
+            finding["evidence"])
+
+
+def compare_scan_pages(previous_pages, current_pages):
+    """Compare two AODA page-result lists ({url, findings} per page).
+
+    Returns a dict of entry lists — each entry is {"page_url", "finding"}
+    — in four buckets:
+
+      resolved       in the previous scan, gone from the new scan of the
+                     same page — the ONLY way a finding earns "fixed"
+                     status in NorthCheck
+      still_open     reported by both scans of the same page
+      new            reported only by the new scan (including findings
+                     on pages scanned for the first time)
+      not_rechecked  the previous scan saw this page but the new scan
+                     did not crawl it, so nothing can be claimed about
+                     those findings either way
+
+    Duplicate identical findings on one page are counted with
+    multiplicity: if a page had three of a finding and now has one, two
+    count as resolved and one as still open.
+    """
+    prev_pages = {_norm_page_url(p["url"]) for p in previous_pages}
+    curr_pages = {_norm_page_url(p["url"]) for p in current_pages}
+
+    def index(pages, restrict=None):
+        by_key = {}
+        for p in pages:
+            if restrict is not None \
+                    and _norm_page_url(p["url"]) not in restrict:
+                continue
+            for f in p["findings"]:
+                by_key.setdefault(finding_key(p["url"], f), []).append(
+                    {"page_url": p["url"], "finding": f})
+        return by_key
+
+    prev_idx = index(previous_pages, restrict=curr_pages)
+    curr_idx = index(current_pages)
+    prev_counts = Counter({k: len(v) for k, v in prev_idx.items()})
+    curr_counts = Counter({k: len(v) for k, v in curr_idx.items()})
+
+    def take(idx, counts, other_counts):
+        out = []
+        for key in idx:
+            n = counts[key] - other_counts.get(key, 0)
+            if n > 0:
+                out.extend(idx[key][:n])
+        return out
+
+    still_open = []
+    for key in curr_idx:
+        n = min(curr_counts[key], prev_counts.get(key, 0))
+        if n > 0:
+            still_open.extend(curr_idx[key][:n])
+    resolved = take(prev_idx, prev_counts, curr_counts)
+    new = take(curr_idx, curr_counts, prev_counts)
+    not_rechecked = []
+    for p in previous_pages:
+        if _norm_page_url(p["url"]) not in curr_pages:
+            not_rechecked.extend(
+                {"page_url": p["url"], "finding": f}
+                for f in p["findings"])
+
+    def order(entry):
+        f = entry["finding"]
+        return (SEVERITY_ORDER[f["severity"]], f["rule_id"],
+                entry["page_url"])
+
+    result = {
+        "resolved": sorted(resolved, key=order),
+        "still_open": sorted(still_open, key=order),
+        "new": sorted(new, key=order),
+        "not_rechecked": sorted(not_rechecked, key=order),
+    }
+    result["counts"] = {
+        "resolved": len(result["resolved"]),
+        "still_open": len(result["still_open"]),
+        "new": len(result["new"]),
+        "not_rechecked": len(result["not_rechecked"]),
+        "previous_total": sum(len(p["findings"])
+                              for p in previous_pages),
+        "current_total": sum(len(p["findings"])
+                             for p in current_pages),
+    }
+    return result
+
+
+# ---------------------------------------------------------------------------
+# AODA Complete the Filing — checklist for the non-website standards
+# ---------------------------------------------------------------------------
+#
+# Every status here is an OWNER-ANSWERED statement. NorthCheck never
+# verifies checklist answers; anywhere they are shown they must be
+# labelled as the organization's own statements. The website itself is
+# NOT a checklist item — web content is evidenced by the AODA scan.
+
+CHECKLIST_STATUSES = ("compliant", "in_progress", "not_started",
+                      "not_applicable")
+
+CHECKLIST_STATUS_LABELS = {
+    "compliant": "Compliant (owner stated)",
+    "in_progress": "In progress (owner stated)",
+    "not_started": "Not started (owner stated)",
+    "not_applicable": "Not applicable (owner stated)",
+    "unanswered": "Not answered yet",
+}
+
+FILING_CHECKLIST = [
+    {
+        "id": "general",
+        "standard": "General requirements",
+        "applies": "Applies to every organization filing the report.",
+        "items": [
+            {"id": "GEN-POLICY",
+             "text": "We have developed, implemented and maintain "
+                     "accessibility policies, including a statement of "
+                     "organizational commitment to meeting the "
+                     "accessibility needs of people with disabilities "
+                     "in a timely manner."},
+            {"id": "GEN-PLAN",
+             "text": "We have established, implemented, maintained "
+                     "and documented a multi-year accessibility plan, "
+                     "posted it (including on our website if we have "
+                     "one) in an accessible format, and we review and "
+                     "update it at least once every five years."},
+            {"id": "GEN-TRAINING",
+             "text": "Everyone who provides goods, services or "
+                     "facilities on our behalf (staff, volunteers and "
+                     "third parties) has been trained on the IASR and "
+                     "on the Human Rights Code as it relates to people "
+                     "with disabilities, and we keep a record of the "
+                     "training, including the dates and the number of "
+                     "people trained."},
+            {"id": "GEN-FEEDBACK",
+             "text": "Our process for receiving and responding to "
+                     "feedback is accessible to people with "
+                     "disabilities, and we let the public know about "
+                     "that process."},
+            {"id": "GEN-KIOSK",
+             "text": "When we design, procure or acquire self-service "
+                     "kiosks, we incorporate their accessibility "
+                     "features and criteria. (Mark Not applicable if "
+                     "we have no self-service kiosks and do not plan "
+                     "to acquire any.)"},
+        ],
+    },
+    {
+        "id": "info_comm",
+        "standard": "Information and Communications — beyond the "
+                    "website",
+        "applies": "The website itself is covered by the AODA scan, "
+                   "not this section. These items cover the rest of "
+                   "the standard.",
+        "items": [
+            {"id": "IC-FORMATS",
+             "text": "On request, we provide (or arrange to provide) "
+                     "accessible formats and communication supports "
+                     "for our information and communications in a "
+                     "timely manner, at a cost no more than the "
+                     "regular cost charged to others, and we consult "
+                     "the person making the request."},
+            {"id": "IC-NOTIFY",
+             "text": "We notify the public about the availability of "
+                     "accessible formats and communication supports."},
+            {"id": "IC-EMERGENCY",
+             "text": "Emergency procedures, plans and public safety "
+                     "information that we make available to the public "
+                     "are provided, on request, in an accessible "
+                     "format or with appropriate communication "
+                     "supports as soon as practicable."},
+        ],
+    },
+    {
+        "id": "customer_service",
+        "standard": "Customer Service",
+        "applies": "Applies to organizations that provide goods, "
+                   "services or facilities to the public or to other "
+                   "third parties in Ontario.",
+        "items": [
+            {"id": "CS-POLICIES",
+             "text": "We have policies, practices and procedures for "
+                     "providing goods, services or facilities to "
+                     "people with disabilities, consistent with the "
+                     "principles of dignity, independence, integration "
+                     "and equal opportunity."},
+            {"id": "CS-DEVICES",
+             "text": "People with disabilities may use their own "
+                     "personal assistive devices on our premises, "
+                     "and our staff are trained on any assistive "
+                     "devices we provide."},
+            {"id": "CS-SUPPORT",
+             "text": "We welcome support persons, let people know in "
+                     "advance about any fee charged for a support "
+                     "person, and obtain consent where the law "
+                     "requires it before discussing confidential "
+                     "matters in a support person's presence."},
+            {"id": "CS-ANIMALS",
+             "text": "We welcome service animals in the parts of our "
+                     "premises that are open to the public (subject "
+                     "to legal exclusions, such as some food "
+                     "preparation areas)."},
+            {"id": "CS-DISRUPTION",
+             "text": "When there is a temporary disruption to the "
+                     "facilities or services people with disabilities "
+                     "usually use, we give notice — including the "
+                     "reason, how long it is expected to last, and "
+                     "alternative facilities or services where "
+                     "available — on our premises and website."},
+            {"id": "CS-TRAINING",
+             "text": "Our customer-service staff and everyone who "
+                     "deals with the public on our behalf has been "
+                     "trained on serving people with disabilities, "
+                     "and we keep training records."},
+        ],
+    },
+    {
+        "id": "employment",
+        "standard": "Employment",
+        "applies": "Applies to organizations with employees. "
+                   "Obligations are owed to employees and to job "
+                   "applicants.",
+        "items": [
+            {"id": "EMP-NOTIFY",
+             "text": "We notify our employees and the public about "
+                     "the availability of accommodation for applicants "
+                     "with disabilities in our recruitment processes."},
+            {"id": "EMP-SELECTION",
+             "text": "We notify job applicants who are individually "
+                     "selected for an assessment or selection process "
+                     "that accommodations are available on request, "
+                     "and we provide suitable accommodation when asked."},
+            {"id": "EMP-INFORM",
+             "text": "We inform successful applicants and all "
+                     "employees of our policies for supporting "
+                     "employees with disabilities, and we update "
+                     "employees whenever those policies change."},
+            {"id": "EMP-FORMATS",
+             "text": "On request, we provide accessible formats and "
+                     "communication supports for information an "
+                     "employee with a disability needs to do their job "
+                     "and for information generally available to "
+                     "employees, after consulting the employee."},
+            {"id": "EMP-PLAN",
+             "text": "We have a process for developing documented "
+                     "individual accommodation plans for employees "
+                     "with disabilities, and plans are in place for "
+                     "employees who have asked for them."},
+            {"id": "EMP-RETURN",
+             "text": "We have a documented return-to-work process "
+                     "for employees who have been absent because of a "
+                     "disability and need disability-related "
+                     "accommodation to return."},
+            {"id": "EMP-PERF",
+             "text": "Our performance management, career development "
+                     "and advancement, and redeployment practices "
+                     "take into account the accessibility needs and "
+                     "any individual accommodation plans of employees "
+                     "with disabilities."},
+        ],
+    },
+    {
+        "id": "transportation",
+        "standard": "Transportation",
+        "applies": "Applies ONLY if your organization provides "
+                   "conventional or specialized transportation "
+                   "services in Ontario. If it does not, mark every "
+                   "item in this section Not applicable.",
+        "items": [
+            {"id": "TRANS-FEATURES",
+             "text": "Our vehicles and their accessibility features, "
+                     "equipment and services meet the Transportation "
+                     "Standard's requirements (including signage, "
+                     "stops, lighting, fare parity and priority "
+                     "seating, as applicable to our service)."},
+            {"id": "TRANS-PLANS",
+             "text": "Accessibility for our transportation services "
+                     "is included in our accessibility plan, and we "
+                     "consult people with disabilities in developing "
+                     "it as the Standard requires."},
+        ],
+    },
+    {
+        "id": "public_spaces",
+        "standard": "Design of Public Spaces",
+        "applies": "Applies when your organization builds or "
+                   "re-develops public spaces covered by the "
+                   "standard (outdoor paths, outdoor eating and play "
+                   "areas, accessible parking, service counters and "
+                   "waiting areas). If you neither own nor redevelop "
+                   "such spaces, mark the items Not applicable.",
+        "items": [
+            {"id": "DPS-BUILD",
+             "text": "When we build or redevelop public spaces, the "
+                     "work meets the Design of Public Spaces "
+                     "requirements for those spaces."},
+            {"id": "DPS-MAINTAIN",
+             "text": "Our accessibility plan includes procedures for "
+                     "preventative and emergency maintenance of the "
+                     "accessible elements of our public spaces, and "
+                     "for dealing with temporary disruptions to them."},
+        ],
+    },
+]
+
+FILING_CERTIFICATION_NOTE = (
+    "The accessibility compliance report itself is filed by your "
+    "organization through the Ontario government's Accessibility "
+    "Compliance Reporting portal, and it must be certified by a "
+    "senior officer of the organization. NorthCheck does not file "
+    "the report and does not certify anything: this pack prepares "
+    "the evidence a senior officer reviews before signing. Checklist "
+    "answers in this pack are your organization's own statements, "
+    "recorded as given — NorthCheck has not verified them."
+)
+
+
+def checklist_items():
+    """Flat list of (section, item) across the whole checklist."""
+    return [(section, item) for section in FILING_CHECKLIST
+            for item in section["items"]]
+
+
+def checklist_summary(answers):
+    """Summarise owner-answered checklist statuses.
+
+    answers: {item_id: status}. Items not in answers count as
+    "unanswered" — never as compliant.
+    """
+    per_standard = []
+    totals = {s: 0 for s in CHECKLIST_STATUSES + ("unanswered",)}
+    for section in FILING_CHECKLIST:
+        row = {"standard": section["standard"], "total": 0}
+        for status in CHECKLIST_STATUSES + ("unanswered",):
+            row[status] = 0
+        for item in section["items"]:
+            status = answers.get(item["id"])
+            if status not in CHECKLIST_STATUSES:
+                status = "unanswered"
+            row[status] += 1
+            row["total"] += 1
+            totals[status] += 1
+        per_standard.append(row)
+    totals["total"] = sum(v for k, v in totals.items() if k != "total")
+    return {"per_standard": per_standard, "totals": totals}
+
+
+def filing_gaps(answers, comparison=None, latest_total=None):
+    """Plain-language remaining-gaps lines for the Filing Pack.
+
+    Website gaps come from scan evidence (latest scan totals and, when
+    present, the re-scan comparison). Checklist gaps come only from
+    owner answers — stated as such.
+    """
+    lines = []
+    if comparison is not None:
+        c = comparison["counts"]
+        if c["still_open"]:
+            lines.append(
+                f"Website: {c['still_open']} finding(s) from the "
+                "previous scan are still open in the latest re-scan.")
+        if c["new"]:
+            lines.append(
+                f"Website: {c['new']} new finding(s) appeared in the "
+                "latest scan.")
+        if c["not_rechecked"]:
+            lines.append(
+                f"Website: {c['not_rechecked']} finding(s) sit on "
+                "pages the latest scan did not crawl, so their status "
+                "is unknown — re-scan those pages before relying on "
+                "them.")
+        if not (c["still_open"] or c["new"] or c["not_rechecked"]):
+            lines.append(
+                "Website: every finding from the previous scan is "
+                "verified resolved by the latest re-scan. Automated "
+                "checks cover only part of WCAG — this is not a "
+                "guarantee the site is compliant.")
+    elif latest_total:
+        lines.append(
+            f"Website: the latest scan reports {latest_total} "
+            "issue(s) to review. No earlier scan is on file for this "
+            "site, so no fix can be shown as verified yet — scan "
+            "again after remediation to verify.")
+    summary = checklist_summary(answers)
+    t = summary["totals"]
+    if t["not_started"]:
+        lines.append(
+            f"Checklist (owner stated): {t['not_started']} item(s) "
+            "are marked Not started.")
+    if t["in_progress"]:
+        lines.append(
+            f"Checklist (owner stated): {t['in_progress']} item(s) "
+            "are marked In progress — not yet in place at filing "
+            "time unless finished first.")
+    if t["unanswered"]:
+        lines.append(
+            f"Checklist: {t['unanswered']} item(s) have not been "
+            "answered. The report asks about every standard that "
+            "applies to you — answer or mark Not applicable for each "
+            "before filing.")
+    return lines
 
 
 # ---------------------------------------------------------------------------

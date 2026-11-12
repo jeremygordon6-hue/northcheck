@@ -3,8 +3,12 @@
 NorthCheck is a Canadian SMB compliance platform. One engine —
 input → deterministic rule checks → plain-English findings → dated
 evidence pack → deadline clocks — with modules switched on per rule
-book. This build ships four modules: AODA FileReady, PostCheck ON,
-Loi25 Kit, and Français Check.
+book. This build ships four scanner modules (AODA FileReady,
+PostCheck ON, Loi25 Kit, and Français Check) plus the **AODA
+Complete the Filing** expansion on top of the AODA scan: a
+remediation tracker with re-scan verification, an owner-answered
+checklist for the non-website accessibility standards, a combined
+Filing Pack, and an accessibility statement generator.
 
 **Honesty rule (product requirement):** NorthCheck prepares evidence.
 It does not certify compliance and is not legal advice. Every finding
@@ -45,7 +49,8 @@ deployment platform requires it — see `DEPLOY.md`.
   (**December 31, 2026** for employers with 20+ staff; 50+ must also
   certify WCAG 2.0 Level AA websites) front and centre; all four
   modules shown live; founding prices (AODA evidence pack **$149**,
-  monitoring **$39/month**; PostCheck **$49/month**; Loi25 Kit
+  monitoring **$39/month**; Complete the Filing Pack **$249**
+  founding; PostCheck **$49/month**; Loi25 Kit
   **$39/month** per site; Français Check included with a scan or
   monitoring plan); and a founding-list email capture (email +
   timestamp stored to `data/founding.json`; **no email is sent**).
@@ -57,6 +62,35 @@ deployment platform requires it — see `DEPLOY.md`.
   suggested fix. Each scan is stored in `data/scans.json` and offers a
   **downloadable evidence pack**: one self-contained HTML file stamped
   with the DRAFT / not-legal-advice header.
+- **AODA Complete the Filing (`/filing`)** — the December 31, 2026
+  compliance report covers all parts of the Integrated Accessibility
+  Standards Regulation (General requirements, Information and
+  Communications, Employment, Transportation where applicable,
+  Design of Public Spaces, Customer Service) and must be certified by
+  a senior officer; the scan alone evidences only the web part.
+  Three pieces: (1) **Remediation tracker** — when a site is scanned
+  again, the results page compares against the previous scan for that
+  site (findings verified resolved / still open / new / on pages not
+  re-crawled). A finding counts as resolved *only* when the re-scan
+  no longer reports it; there is deliberately no "mark as fixed"
+  button, so an owner's say-so is never presented as verification.
+  (2) **Checklist** — 25 owner-answered statements across the six
+  standards areas (`compliant / in progress / not started / not
+  applicable`), stored in `data/checklists.json`. Answers are the
+  organization's own statements and are labelled "owner stated"
+  everywhere — NorthCheck never verifies them. (3) **Filing Pack +
+  accessibility statement** — one dated HTML pack combining the
+  website findings with their status, the checklist answers by
+  standard, the remaining gaps, and a prominent certification note
+  (the report is filed by the organization on the Ontario government
+  portal and certified by a senior officer; NorthCheck prepares
+  evidence, it does not file or certify); and a publish-ready
+  accessibility statement generated only from the recorded scan and
+  checklist, with bracketed placeholders for anything only the
+  organization can supply (e.g. the feedback contact). Presented on
+  the landing page at a **$249 founding price** (a hypothesis, not a
+  validated price); interest routes to the free scan and the founding
+  list — no payment links.
 - **PostCheck (`/postcheck`)** — title, employer, date posted, and the
   pasted posting text are checked against Ontario's Jan 1, 2026 rules
   (O. Reg. 476/24): compensation presence, the $50,000 range-width cap
@@ -111,17 +145,25 @@ check. Regression fixtures live in `../northcheck/` (`demo_site.html`,
 python3 check_app.py
 ```
 
-**44 / 44 end-to-end checks passed** on 2026-11-11: the Phase 1
-engine regression counts (demo AODA 10 findings, demo PostCheck 4),
-every pre-existing page and flow, the Loi25 engine on three fabricated
-fixture sites (bad 3 findings / good 0 / mid 1), the Français engine
-(bad 4 / good 0 / mid 1, plus the resolved-but-English case), and both
-new modules' forms, scan flows, stored records, and evidence packs.
-The checker backs up and restores `data/`, so test entries never reach
-the real stores. (The pre-build baseline, run with a temporary harness
-covering the same pre-existing surface, was 20/20; the README's older
-43/43 figure was verified on 2026-11-07 but that suite was not saved
-in this folder.)
+**74 / 74 end-to-end checks passed** on 2026-11-11 (the pre-existing
+suite was 44/44 before the Complete the Filing build; all 44 still
+pass): the Phase 1 engine regression counts (demo AODA 10 findings,
+demo PostCheck 4), every pre-existing page and flow, the Loi25 engine
+on three fabricated fixture sites (bad 3 findings / good 0 / mid 1),
+the Français engine (bad 4 / good 0 / mid 1, plus the
+resolved-but-English case), both modules' forms, scan flows, stored
+records, and evidence packs — plus 30 Complete the Filing checks:
+re-scan comparison correctness (improving fixture site: 2 resolved /
+1 still open / 0 new; a page dropped from the crawl counts as
+not-rechecked, never resolved; duplicate findings counted with
+multiplicity), the checklist flow end to end, Filing Pack contents
+(website findings, owner-stated labels, certification note, gaps),
+and statement generation with marked placeholders. The checker backs
+up and restores `data/`, so test entries never reach the real stores.
+(The pre-build baseline, run with a temporary harness covering the
+same pre-existing surface, was 20/20; the README's older 43/43 figure
+was verified on 2026-11-07 but that suite was not saved in this
+folder.)
 
 ## Limitations (stated plainly)
 
@@ -144,6 +186,18 @@ in this folder.)
 - **Findings are issues to review, not verdicts.** An empty findings
   list is not a guarantee of compliance, and a finding is not a
   determination of non-compliance.
+- **Checklist answers are owner-stated, never verified.** The
+  Complete the Filing checklist records what the organization says
+  about its own non-website practices. Nothing in the app checks
+  those answers against reality; they are labelled as the
+  organization's own statements in the UI, the Filing Pack, and the
+  generated statement.
+- **Re-scan comparison keys on the scan's start address and on each
+  finding's rule + evidence text.** Scanning the same site from a
+  different start address starts a fresh history, and a fix that
+  changes a finding's evidence snippet without removing the
+  underlying problem pattern can read as one resolved plus one new
+  finding rather than one still open.
 - Storage is local JSON files — fine for founding-cohort volume, not
   a multi-tenant database. No user accounts yet.
 
