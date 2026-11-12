@@ -18,16 +18,25 @@ ports, then asserts:
     findings), the /filing checklist flow end to end, the Filing Pack
     (website findings + owner-stated answers + certification note),
     and the accessibility statement with marked placeholders.
+  * Email Authentication Check: engine findings on fabricated DNS
+    answers served through a mocked resolver (fully protected /
+    unprotected / partial domains, multiple-SPF and over-lookup-limit
+    records, and the resolver-failure path), the /emailauth form and
+    scan flow (the app subprocess reads the same fabricated answers
+    from a NORTHCHECK_DNS_FIXTURE JSON file — fully offline), and
+    its evidence pack.
 
 The app's data/ directory is backed up first and restored afterwards,
 so founding signups, scans and vault entries from real use are never
 touched by the test run.
 """
 
+import json as _json_mod
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -242,6 +251,52 @@ class FixtureHandler(BaseHTTPRequestHandler):
 
 def fixture_pages(*paths):
     return [{"url": FIX + p, "html": FIXTURES[p]} for p in paths]
+
+
+# ---------------------------------------------------------------------------
+# Fabricated DNS answers for the Email Authentication Check.
+# Shape: {name: {"answers": [TXT, ...]} | {"error": true}} — a name
+# absent from the table answers with no records. The engine tests use
+# it through a fake resolver; the app subprocess reads the same table
+# from a JSON file named by NORTHCHECK_DNS_FIXTURE. Fully offline.
+# ---------------------------------------------------------------------------
+
+DNS_TABLE = {
+    # Fully protected: SPF -all (1 lookup via include), DMARC
+    # p=reject with rua, DKIM key on selector1.
+    "protected.example": {"answers": [
+        "v=spf1 include:_spf.google.com -all"]},
+    "_spf.google.com": {"answers": [
+        "v=spf1 ip4=209.85.220.0/24 ~all"]},
+    "_dmarc.protected.example": {"answers": [
+        "v=DMARC1; p=reject; rua=mailto:dmarc@protected.example"]},
+    "selector1._domainkey.protected.example": {"answers": [
+        "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC"]},
+    # Partial: SPF +all, DMARC p=none with no rua, no DKIM anywhere.
+    "partial.example": {"answers": ["v=spf1 +all"]},
+    "_dmarc.partial.example": {"answers": ["v=DMARC1; p=none"]},
+    # Invalid: two SPF records at one domain.
+    "multi.example": {"answers": [
+        "v=spf1 include:sendgrid.example -all", "v=spf1 -all"]},
+    # Over the limit: 11 include mechanisms, nothing nested.
+    "loopy.example": {"answers": [
+        "v=spf1 " + " ".join(f"include:i{n}.example"
+                              for n in range(1, 12)) + " -all"]},
+    # bare.example is deliberately absent everywhere: no records.
+}
+for _name in (["fail.example", "_dmarc.fail.example"]
+              + [f"{s}._domainkey.fail.example"
+                 for s in nc.DKIM_COMMON_SELECTORS]):
+    DNS_TABLE[_name] = {"error": True}
+
+
+def fixture_resolver(name):
+    entry = DNS_TABLE.get(name)
+    if entry is None:
+        return []
+    if entry.get("error"):
+        raise nc.DnsLookupError(f"fixture failure for {name}")
+    return list(entry.get("answers", []))
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +516,70 @@ def engine_filing_checks():
           and "has not verified" in nc.FILING_CERTIFICATION_NOTE)
 
 
+def engine_emailauth_checks():
+    print("Engine — Email Authentication Check (mocked DNS)")
+    f, s = nc.run_emailauth_checks("protected.example",
+                                   resolver=fixture_resolver)
+    check("protected domain: 0 findings", len(f) == 0,
+          f"got {[(x['rule_id']) for x in f]}")
+    check("protected domain: DKIM found on selector1",
+          [d["selector"] for d in s["dkim_found"]] == ["selector1"],
+          str(s["dkim_found"]))
+    check("protected domain: SPF chain counted at 1 lookup, complete",
+          s["spf_dns_lookups"] == 1 and s["spf_lookup_complete"],
+          str(s["spf_dns_lookups"]))
+    check("protected domain: DMARC policy read as reject",
+          s["dmarc_policy"] == "reject", str(s["dmarc_policy"]))
+
+    f, s = nc.run_emailauth_checks("bare.example",
+                                   resolver=fixture_resolver)
+    by_rule = {x["rule_id"]: x["severity"] for x in f}
+    check("bare domain: SPF/DMARC missing (high) + DKIM not found "
+          "(medium), nothing else",
+          by_rule == {"EMAIL-SPF-MISSING": "high",
+                      "EMAIL-DMARC-MISSING": "high",
+                      "EMAIL-DKIM-NOTFOUND": "medium"}, str(by_rule))
+    dkim_f = next(x for x in f if x["rule_id"] == "EMAIL-DKIM-NOTFOUND")
+    check("DKIM not-found finding carries the honesty wording",
+          "may still exist under a different selector name"
+          in dkim_f["explanation"])
+
+    f, s = nc.run_emailauth_checks("partial.example",
+                                   resolver=fixture_resolver)
+    by_rule = {x["rule_id"]: x["severity"] for x in f}
+    check("partial domain: +all high, p=none medium, no-rua low, "
+          "DKIM not found medium",
+          by_rule == {"EMAIL-SPF-PASSALL": "high",
+                      "EMAIL-DMARC-MONITORING": "medium",
+                      "EMAIL-DMARC-NOREPORTING": "low",
+                      "EMAIL-DKIM-NOTFOUND": "medium"}, str(by_rule))
+
+    f, _s = nc.run_emailauth_checks("multi.example",
+                                    resolver=fixture_resolver)
+    check("two SPF records flag EMAIL-SPF-MULTIPLE (high)",
+          any(x["rule_id"] == "EMAIL-SPF-MULTIPLE"
+              and x["severity"] == "high" for x in f),
+          str([x["rule_id"] for x in f]))
+    f, s = nc.run_emailauth_checks("loopy.example",
+                                   resolver=fixture_resolver)
+    check("11-include SPF flags EMAIL-SPF-LOOKUPS with count 11",
+          any(x["rule_id"] == "EMAIL-SPF-LOOKUPS" for x in f)
+          and s["spf_dns_lookups"] == 11,
+          f"count {s['spf_dns_lookups']}, "
+          f"rules {[x['rule_id'] for x in f]}")
+
+    def boom(_name):
+        raise nc.DnsLookupError("resolver down")
+
+    f, s = nc.run_emailauth_checks("fail.example", resolver=boom)
+    check("resolver failure: resolution_failed, no findings invented",
+          s["resolution_failed"] is True and f == [],
+          f"failed={s['resolution_failed']} findings={len(f)}")
+    check("normalize_domain reduces a URL to the bare domain",
+          nc.normalize_domain("https://Example.COM/some/path")
+          == "example.com")
+
+
 def app_baseline_checks():
     print("App baseline (pre-existing pages and flows)")
     s, body = get("/")
@@ -635,6 +754,58 @@ def app_filing_checks():
           s == 400)
 
 
+def app_emailauth_checks():
+    print("App — Email Authentication Check")
+    s, body = get("/")
+    check("landing shows Email Authentication Check as Module 5 live",
+          "Email Authentication Check" in body
+          and "Module 5 — live" in body)
+    check("landing presents it as a free check with TenantCheck "
+          "cross-reference",
+          "Free check" in body and "tenantcheck365.ca" in body)
+    s, body = get("/emailauth")
+    check("/emailauth 200 with domain form",
+          s == 200 and 'name="domain"' in body)
+
+    s, body = post("/emailauth", {"domain": "protected.example"})
+    check("protected domain flow: 0 issues in total",
+          s == 200 and "0 issues to review in total" in body,
+          f"status {s}")
+    check("protected results show the records found + cross-reference",
+          "selector1" in body and "p=reject" in body
+          and "TenantCheck 365" in body)
+    rec = last_scan_record()
+    check("emailauth scan stored as module emailauth",
+          rec.get("module") == "emailauth")
+    s, body = get(f"/pack/{rec['id']}")
+    check("emailauth evidence pack 200 with DRAFT stamp, module "
+          "label and record evidence",
+          s == 200 and "DRAFT" in body
+          and "Email Authentication Check" in body
+          and "v=DMARC1; p=reject" in body
+          and "public DNS records showed" in body)
+
+    s, body = post("/emailauth", {"domain": "bare.example"})
+    check("bare domain flow: 3 issues in total",
+          s == 200 and "3 issues to review in total" in body,
+          f"status {s}")
+    check("bare results carry the DKIM honesty wording",
+          "may still exist under a different selector name" in body)
+    s, body = post("/emailauth", {"domain": "partial.example"})
+    check("partial domain flow: 4 issues in total, +all shown as "
+          "evidence",
+          s == 200 and "4 issues to review in total" in body
+          and "v=spf1 +all" in body, f"status {s}")
+    s, body = post("/emailauth", {"domain": "fail.example"})
+    check("resolver failure flow: honest could-not-complete page, "
+          "no findings claimed",
+          s == 200 and "Check could not be completed" in body
+          and "issues to review in total" not in body,
+          f"status {s}")
+    s, body = post("/emailauth", {"domain": "not a domain"})
+    check("emailauth rejects a non-domain (400)", s == 400)
+
+
 def main():
     backup_dir = DATA_DIR + ".check-backup"
     if os.path.exists(backup_dir):
@@ -643,7 +814,13 @@ def main():
         shutil.copytree(DATA_DIR, backup_dir)
     fix = ThreadingHTTPServer(("127.0.0.1", FIX_PORT), FixtureHandler)
     threading.Thread(target=fix.serve_forever, daemon=True).start()
-    env = dict(os.environ, PORT=str(APP_PORT), HOST="127.0.0.1")
+    dns_fixture = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", prefix="northcheck-dns-",
+        delete=False)
+    _json_mod.dump(DNS_TABLE, dns_fixture)
+    dns_fixture.close()
+    env = dict(os.environ, PORT=str(APP_PORT), HOST="127.0.0.1",
+               NORTHCHECK_DNS_FIXTURE=dns_fixture.name)
     app = subprocess.Popen([sys.executable, "app.py"], cwd=APP_DIR,
                            env=env, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)
@@ -658,12 +835,15 @@ def main():
         engine_loi25_checks()
         engine_francais_checks()
         engine_filing_checks()
+        engine_emailauth_checks()
         app_baseline_checks()
         app_new_module_checks()
         app_filing_checks()
+        app_emailauth_checks()
     finally:
         app.terminate()
         fix.shutdown()
+        os.unlink(dns_fixture.name)
         shutil.rmtree(DATA_DIR, ignore_errors=True)
         if os.path.exists(backup_dir):
             shutil.move(backup_dir, DATA_DIR)

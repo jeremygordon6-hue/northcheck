@@ -17,6 +17,12 @@ driven by the app's crawler):
                 named privacy officer, cookie consent, French policy).
   * francais  : Français Check — a real French version exists and its
                 key pages (home, contact, privacy) resolve in French.
+  * emailauth : Email Authentication Check — DMARC / SPF / DKIM from
+                public DNS only (run_emailauth_checks over an
+                injectable DNS-over-HTTPS resolver). DKIM selectors
+                cannot be enumerated, so a documented common-selector
+                list is checked and a not-found result never claims
+                DKIM is absent.
   * filing    : AODA Complete the Filing — re-scan comparison
                 (compare_scan_pages: a finding counts as resolved only
                 when a later scan no longer reports it), an
@@ -1136,6 +1142,499 @@ def run_francais_checks(pages, attempts):
         "attempts": len(attempts),
         "attempts_ok": sum(1 for a in attempts if a["ok"]),
     }
+    return findings, stats
+
+
+# ---------------------------------------------------------------------------
+# Module Email Authentication Check — DMARC / SPF / DKIM from public DNS
+# ---------------------------------------------------------------------------
+# Deterministic checks over the domain's public DNS TXT records only:
+# the SPF record at the domain, the DMARC record at _dmarc.<domain>,
+# and DKIM records under a documented list of common selectors (DKIM
+# selectors cannot be enumerated from DNS, so a domain whose DKIM uses
+# another selector name will read as "not found on the selectors
+# checked" — the finding says exactly that and never claims DKIM is
+# absent). Resolution goes through DNS-over-HTTPS JSON (Google) via an
+# injectable resolver callable: resolver(name) -> list of TXT record
+# strings, raising DnsLookupError when the lookup itself fails. Tests
+# pass a fake resolver and run fully offline.
+
+DOH_ENDPOINT = "https://dns.google/resolve"
+DNS_TIMEOUT = 6          # seconds per DoH query
+DKIM_COMMON_SELECTORS = [
+    "default", "google", "selector1", "selector2", "k1", "k2",
+    "s1", "s2", "mail", "dkim", "mandrill", "smtp",
+]
+
+EMAILAUTH_STAMP = (
+    "This check reports what the domain's public DNS records showed "
+    "at scan time. NorthCheck prepares evidence; it does not certify "
+    "compliance and is not legal advice."
+)
+
+
+class DnsLookupError(Exception):
+    """A DNS lookup itself failed (resolver unreachable / error)."""
+
+
+def _clean_txt_data(data):
+    """Google DoH returns TXT data as quoted segments; join them."""
+    parts = re.findall(r'"((?:[^"\\]|\\.)*)"', data or "")
+    if parts:
+        return "".join(p.replace('\\"', '"') for p in parts)
+    return (data or "").strip()
+
+
+def doh_txt_resolver(name, endpoint=None, timeout=DNS_TIMEOUT):
+    """Default resolver: TXT records for name via DNS-over-HTTPS.
+
+    Returns a list of record strings (empty when the name has no TXT
+    records). Raises DnsLookupError when the lookup cannot be
+    completed — callers must not treat that as "no records".
+    """
+    endpoint = endpoint or os.environ.get("NORTHCHECK_DOH_URL") \
+        or DOH_ENDPOINT
+    query = urllib.parse.urlencode({"name": name, "type": "TXT"})
+    req = urllib.request.Request(
+        f"{endpoint}?{query}",
+        headers={"Accept": "application/dns-json",
+                 "User-Agent": "NorthCheck/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8", "replace"))
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise DnsLookupError(f"DNS lookup for {name} failed ({exc})")
+    status = payload.get("Status", 0)
+    if status == 3:                       # NXDOMAIN — name does not exist
+        return []
+    if status != 0:
+        raise DnsLookupError(
+            f"DNS lookup for {name} returned status {status}")
+    records = []
+    for answer in payload.get("Answer", []) or []:
+        if answer.get("type") == 16:     # TXT
+            records.append(_clean_txt_data(answer.get("data", "")))
+    return records
+
+
+_SPF_MECHANISMS = {"all", "include", "a", "mx", "ptr", "ip4", "ip6",
+                   "exists"}
+_SPF_MODIFIERS = {"redirect", "exp"}
+_SPF_LOOKUP_MECHS = {"include", "a", "mx", "ptr", "exists"}
+
+
+def _spf_terms(record):
+    """Yield (qualifier, name, value) for each term after v=spf1."""
+    for token in record.split()[1:]:
+        qualifier = ""
+        term = token
+        if term[:1] in "+-~?":
+            qualifier, term = term[0], term[1:]
+        if "=" in term:
+            name, _, value = term.partition("=")
+            yield qualifier, name.lower(), value
+            continue
+        name = re.split(r"[:/]", term)[0].lower()
+        value = term[len(name):].lstrip(":/")
+        yield qualifier, name, value
+
+
+def _spf_lookup_count(record, domain, resolver, visited=None, depth=0):
+    """Count DNS-lookup terms in an SPF record, following includes.
+
+    Counts include/a/mx/ptr/exists mechanisms and redirect modifiers
+    in this record plus, recursively, in the SPF records of include /
+    redirect targets this resolver can fetch. Returns (count,
+    complete): complete is False when some target could not be
+    resolved or the chain was cut (depth / revisit), so the count is
+    a floor, not the full chain.
+    """
+    if visited is None:
+        visited = set()
+    visited.add(domain.lower())
+    count = 0
+    complete = True
+    for _qual, name, value in _spf_terms(record):
+        target = None
+        if name in _SPF_LOOKUP_MECHS:
+            count += 1
+            if name == "include":
+                target = value
+        elif name == "redirect":
+            count += 1
+            target = value
+        if target:
+            target = target.split("/")[0].strip().lower()
+            if not target or target in visited or depth >= 5:
+                complete = False
+                continue
+            try:
+                nested = [r for r in resolver(target)
+                          if r.strip().lower().startswith("v=spf1")]
+            except DnsLookupError:
+                complete = False
+                continue
+            if nested:
+                sub, sub_complete = _spf_lookup_count(
+                    nested[0].strip(), target, resolver, visited,
+                    depth + 1)
+                count += sub
+                complete = complete and sub_complete
+    return count, complete
+
+
+def _check_spf(domain, txt_records, resolver, findings):
+    """SPF findings + stats for the TXT records found at the domain."""
+    add = findings.append
+    spf_records = [r.strip() for r in txt_records
+                   if r.strip().lower().startswith("v=spf1")]
+    stats = {"spf_records": spf_records, "spf_record": None,
+             "spf_dns_lookups": None, "spf_lookup_complete": None}
+    if not spf_records:
+        add(make_finding(
+            "emailauth", "EMAIL-SPF-MISSING", "high",
+            "Email authentication · SPF missing",
+            "No SPF record (a TXT record starting with v=spf1) is "
+            "published at this domain. SPF is how receiving mail "
+            "servers check whether a sender is allowed to send for "
+            "the domain; without it, anyone can spoof the domain and "
+            "nothing in DNS says otherwise.",
+            f"(no v=spf1 TXT record at {domain})",
+            "Publish one SPF TXT record at the domain naming the "
+            "services that send your mail (for example your Microsoft "
+            "365 or Google Workspace include) and ending in -all."))
+        return stats
+    record = spf_records[0]
+    stats["spf_record"] = record
+    if len(spf_records) > 1:
+        add(make_finding(
+            "emailauth", "EMAIL-SPF-MULTIPLE", "high",
+            "Email authentication · multiple SPF records",
+            "More than one SPF record is published at this domain. "
+            "The SPF specification says a domain must publish exactly "
+            "one; with two or more, receivers treat the result as an "
+            "error (PermError) and the records protect nothing.",
+            " · ".join(spf_records),
+            "Merge everything into a single v=spf1 record and delete "
+            "the extras."))
+    terms = list(_spf_terms(record))
+    all_terms = [(q, v) for q, n, v in terms if n == "all"]
+    if any(q == "+" for q, _v in all_terms):
+        add(make_finding(
+            "emailauth", "EMAIL-SPF-PASSALL", "high",
+            "Email authentication · SPF passes everyone (+all)",
+            "The SPF record ends in +all, which tells every receiving "
+            "server that ANY sender on the internet is authorized to "
+            "send mail as this domain. That is worse than a stern "
+            "warning — it affirmatively authorizes spoofing. This is "
+            "the single most dangerous SPF state this check can find.",
+            record,
+            "Change +all to -all (or ~all while you are still "
+            "inventorying senders) so only the listed services pass."))
+    elif not all_terms:
+        add(make_finding(
+            "emailauth", "EMAIL-SPF-NOALL", "medium",
+            "Email authentication · SPF has no all mechanism",
+            "The SPF record never says what to do with senders it "
+            "does not list: there is no -all, ~all, ?all or +all "
+            "mechanism. Unlisted senders get a neutral result, which "
+            "most receivers treat as a pass for filtering purposes.",
+            record,
+            "End the record with -all once every legitimate sender "
+            "is listed (or ~all while you are still checking)."))
+    elif any(q == "~" for q, _v in all_terms):
+        add(make_finding(
+            "emailauth", "EMAIL-SPF-SOFTFAIL", "low",
+            "Email authentication · SPF softfail (~all)",
+            "The SPF record ends in ~all (softfail): unlisted "
+            "senders are flagged as suspicious rather than rejected. "
+            "That is a reasonable step while inventorying senders, "
+            "but it is weaker protection than -all.",
+            record,
+            "Move to -all when you are confident every legitimate "
+            "sender is listed in the record."))
+    elif any(q == "?" for q, _v in all_terms):
+        add(make_finding(
+            "emailauth", "EMAIL-SPF-NEUTRAL", "medium",
+            "Email authentication · SPF neutral (?all)",
+            "The SPF record ends in ?all (neutral): the domain "
+            "explicitly takes no position on unlisted senders, so "
+            "SPF gives receivers no basis to reject spoofed mail.",
+            record,
+            "Change ?all to -all (or ~all while inventorying "
+            "senders) so the record actually decides."))
+    unknown = sorted({n for _q, n, _v in terms
+                      if n not in _SPF_MECHANISMS
+                      and n not in _SPF_MODIFIERS and "%" not in n})
+    if unknown:
+        add(make_finding(
+            "emailauth", "EMAIL-SPF-SYNTAX", "medium",
+            "Email authentication · SPF syntax problem",
+            "The SPF record contains term(s) that are not recognized "
+            "SPF mechanisms or modifiers: " + ", ".join(unknown)
+            + ". An unrecognized mechanism makes the whole record a "
+            "permanent error at many receivers.",
+            record,
+            "Remove or correct the unrecognized term(s) and validate "
+            "the record; keep only documented mechanisms (all, "
+            "include, a, mx, ptr, ip4, ip6, exists) and modifiers "
+            "(redirect, exp)."))
+    count, complete = _spf_lookup_count(record, domain, resolver)
+    stats["spf_dns_lookups"] = count
+    stats["spf_lookup_complete"] = complete
+    if count > 10:
+        add(make_finding(
+            "emailauth", "EMAIL-SPF-LOOKUPS", "high",
+            "Email authentication · SPF over the 10 lookup limit",
+            f"The SPF record's mechanism chain needs {count} DNS "
+            "lookups (counted through the includes this check could "
+            "resolve). SPF allows at most 10; past that, receivers "
+            "return a permanent error and the record protects "
+            "nothing, however good it looks.",
+            record,
+            "Flatten the chain: replace nested includes with the "
+            "senders' ip4/ip6 ranges where stable, and drop includes "
+            "for services that no longer send your mail."))
+    return stats
+
+
+def _check_dmarc(domain, resolver, lookup_errors, findings):
+    """DMARC findings + stats for the record at _dmarc.<domain>."""
+    add = findings.append
+    stats = {"dmarc_record": None, "dmarc_policy": None}
+    name = f"_dmarc.{domain}"
+    try:
+        txt_records = resolver(name)
+    except DnsLookupError as exc:
+        lookup_errors.append(str(exc))
+        stats["dmarc_lookup_failed"] = True
+        return stats
+    dmarc_records = [r.strip() for r in txt_records
+                     if r.strip().lower().startswith("v=dmarc1")]
+    if not dmarc_records:
+        add(make_finding(
+            "emailauth", "EMAIL-DMARC-MISSING", "high",
+            "Email authentication · DMARC missing",
+            "No DMARC record is published at _dmarc." + domain + ". "
+            "DMARC is what lets the domain tell receivers to reject "
+            "or quarantine mail that fails SPF and DKIM alignment — "
+            "and what gets the domain's own reports about who is "
+            "sending as it. Without DMARC, spoofed mail that fails "
+            "checks can still be delivered.",
+            f"(no v=DMARC1 TXT record at {name})",
+            "Publish a DMARC TXT record at _dmarc." + domain
+            + " — start at p=none with an rua reporting address to "
+            "see who sends as you, then move to p=reject."))
+        return stats
+    record = dmarc_records[0]
+    stats["dmarc_record"] = record
+    if len(dmarc_records) > 1:
+        add(make_finding(
+            "emailauth", "EMAIL-DMARC-MULTIPLE", "high",
+            "Email authentication · multiple DMARC records",
+            "More than one DMARC record is published at _dmarc."
+            + domain + ". Receivers ignore DMARC entirely when a "
+            "domain publishes more than one record, so the domain "
+            "effectively has no DMARC policy.",
+            " · ".join(dmarc_records),
+            "Keep exactly one DMARC record at _dmarc." + domain
+            + " and delete the rest."))
+    tags = {}
+    for part in record.split(";"):
+        if "=" in part:
+            key, _, value = part.partition("=")
+            tags[key.strip().lower()] = value.strip()
+    policy = (tags.get("p") or "").lower()
+    stats["dmarc_policy"] = policy or None
+    if not policy:
+        add(make_finding(
+            "emailauth", "EMAIL-DMARC-NOPOLICY", "medium",
+            "Email authentication · DMARC record has no policy",
+            "The DMARC record has no p= tag, so it states no policy "
+            "and receivers treat the record as invalid.",
+            record,
+            "Add a p= tag — p=none to monitor, p=quarantine or "
+            "p=reject to protect."))
+    elif policy == "none":
+        add(make_finding(
+            "emailauth", "EMAIL-DMARC-MONITORING", "medium",
+            "Email authentication · DMARC is monitor only (p=none)",
+            "The DMARC policy is p=none: receivers report on failing "
+            "mail but are told to deliver it anyway. That is the "
+            "right first step when DMARC is new — it is not "
+            "protection yet.",
+            record,
+            "Once the DMARC reports show every legitimate sender "
+            "aligned, move the policy to p=quarantine, then "
+            "p=reject."))
+    elif policy == "quarantine":
+        add(make_finding(
+            "emailauth", "EMAIL-DMARC-QUARANTINE", "info",
+            "Email authentication · DMARC quarantine (partial)",
+            "The DMARC policy is p=quarantine: failing mail is "
+            "treated as suspicious (usually sent to spam) rather "
+            "than rejected outright. Real protection, one step "
+            "short of the strongest setting.",
+            record,
+            "Move to p=reject when the reports show no legitimate "
+            "sender would be caught."))
+    elif policy == "reject":
+        pass  # strongest policy — the stats table shows it as the pass
+    else:
+        add(make_finding(
+            "emailauth", "EMAIL-DMARC-BADPOLICY", "medium",
+            "Email authentication · DMARC policy not recognized",
+            f"The DMARC p= value is \"{policy}\", which is not one "
+            "of none, quarantine or reject. Receivers treat an "
+            "unrecognized policy as an invalid record.",
+            record,
+            "Set p= to none, quarantine or reject."))
+    pct = tags.get("pct")
+    if pct and pct.isdigit() and int(pct) < 100:
+        add(make_finding(
+            "emailauth", "EMAIL-DMARC-PARTIAL", "info",
+            "Email authentication · DMARC applies to some mail only",
+            f"The DMARC record sets pct={pct}, so the policy is "
+            "applied to only that percentage of failing mail. That "
+            "is a rollout setting, not a finished one.",
+            record,
+            "Raise pct to 100 (or remove the tag) once the rollout "
+            "is complete."))
+    strict = [f"{tag}={tags[tag]}" for tag in ("adkim", "aspf")
+              if tags.get(tag, "").lower() == "s"]
+    if strict:
+        add(make_finding(
+            "emailauth", "EMAIL-DMARC-ALIGNMENT", "info",
+            "Email authentication · strict alignment set",
+            "The DMARC record sets strict alignment ("
+            + ", ".join(strict) + ") instead of the default relaxed "
+            "alignment. That is a deliberate, stronger setting — "
+            "noted here so it is on the record, and worth knowing "
+            "about before blaming DMARC for a delivery problem.",
+            record,
+            "No change needed if strict alignment was set on "
+            "purpose; otherwise remove the tag to return to relaxed "
+            "alignment."))
+    if "rua" not in tags:
+        add(make_finding(
+            "emailauth", "EMAIL-DMARC-NOREPORTING", "low",
+            "Email authentication · no DMARC reporting address",
+            "The DMARC record has no rua= reporting address, so the "
+            "domain receives no aggregate reports about who is "
+            "sending mail as it — the evidence that makes moving to "
+            "a stronger policy safe.",
+            record,
+            "Add rua=mailto:an address you monitor (or a DMARC "
+            "reporting service) to the record."))
+    return stats
+
+
+def _check_dkim(domain, resolver, lookup_errors, findings):
+    """DKIM findings + stats over the common selector list."""
+    add = findings.append
+    found = []
+    failed = 0
+    for selector in DKIM_COMMON_SELECTORS:
+        name = f"{selector}._domainkey.{domain}"
+        try:
+            txt_records = resolver(name)
+        except DnsLookupError as exc:
+            lookup_errors.append(str(exc))
+            failed += 1
+            continue
+        for record in txt_records:
+            text = record.strip()
+            tags = {}
+            for part in text.split(";"):
+                if "=" in part:
+                    key, _, value = part.partition("=")
+                    tags[key.strip().lower()] = value.strip()
+            if text.lower().startswith("v=dkim1") or "p" in tags:
+                found.append({"selector": selector, "record": text})
+                if "p" in tags and not tags["p"]:
+                    add(make_finding(
+                        "emailauth", "EMAIL-DKIM-REVOKED", "medium",
+                        "Email authentication · DKIM key revoked",
+                        f"The DKIM record under the \"{selector}\" "
+                        "selector has an empty public key (p=), which "
+                        "is how a key is revoked: mail signed with "
+                        "that selector cannot verify. If a sending "
+                        "service still uses this selector, its mail "
+                        "is failing DKIM.",
+                        text,
+                        "If the service still sends for you, republish "
+                        "its current public key; if it was retired on "
+                        "purpose, this note is your confirmation."))
+                break
+    stats = {"dkim_found": found,
+             "dkim_selectors_checked": list(DKIM_COMMON_SELECTORS),
+             "dkim_lookups_failed": failed}
+    if not found:
+        add(make_finding(
+            "emailauth", "EMAIL-DKIM-NOTFOUND", "medium",
+            "Email authentication · no DKIM on common selectors",
+            "No DKIM record was found on the common selectors "
+            "checked (" + ", ".join(DKIM_COMMON_SELECTORS) + "). "
+            "DKIM selectors cannot be enumerated from DNS, so this "
+            "does not prove DKIM is absent: DKIM may still exist "
+            "under a different selector name. It does mean the "
+            "selectors used by the biggest senders (Google "
+            "Workspace, Microsoft 365 and the major mailing "
+            "services) show no key — if the domain sends through "
+            "one of them, its mail is very likely not being signed.",
+            f"(no v=DKIM1 record at any <selector>._domainkey."
+            f"{domain} for the selectors checked)",
+            "Check each sending service's DKIM settings: turn DKIM "
+            "signing on and publish the selector record it gives "
+            "you, then re-run this check."))
+    return stats
+
+
+def normalize_domain(value):
+    """Reduce user input (bare domain or URL) to a bare domain."""
+    text = (value or "").strip().lower()
+    if "://" in text:
+        text = urllib.parse.urlparse(text).hostname or ""
+    text = text.split("/")[0].split(":")[0].rstrip(".")
+    return text
+
+
+def run_emailauth_checks(domain, resolver=None):
+    """Return (findings, stats) for a domain's email authentication.
+
+    resolver: callable(name) -> list of TXT record strings, raising
+    DnsLookupError on lookup failure. Defaults to the DNS-over-HTTPS
+    resolver. When the lookups needed to judge SPF and DMARC both
+    fail, stats["resolution_failed"] is True and findings is empty:
+    the caller must present "check could not be completed", never
+    findings invented from missing data.
+    """
+    if resolver is None:
+        resolver = doh_txt_resolver
+    domain = normalize_domain(domain)
+    findings = []
+    lookup_errors = []
+    stats = {"domain": domain, "resolution_failed": False,
+             "lookup_errors": lookup_errors}
+    try:
+        apex_records = resolver(domain)
+        apex_failed = False
+    except DnsLookupError as exc:
+        apex_records, apex_failed = [], True
+        lookup_errors.append(str(exc))
+    spf_stats = _check_spf(domain, apex_records, resolver, findings) \
+        if not apex_failed else {"spf_records": [], "spf_record": None,
+                                 "spf_dns_lookups": None,
+                                 "spf_lookup_complete": None}
+    stats.update(spf_stats)
+    dmarc_stats = _check_dmarc(domain, resolver, lookup_errors,
+                               findings)
+    stats.update(dmarc_stats)
+    dkim_stats = _check_dkim(domain, resolver, lookup_errors, findings)
+    stats.update(dkim_stats)
+    if apex_failed and dmarc_stats.get("dmarc_lookup_failed"):
+        stats["resolution_failed"] = True
+        findings = []
     return findings, stats
 
 

@@ -3,12 +3,13 @@
 NorthCheck is a Canadian SMB compliance platform. One engine —
 input → deterministic rule checks → plain-English findings → dated
 evidence pack → deadline clocks — with modules switched on per rule
-book. This build ships four scanner modules (AODA FileReady,
-PostCheck ON, Loi25 Kit, and Français Check) plus the **AODA
-Complete the Filing** expansion on top of the AODA scan: a
-remediation tracker with re-scan verification, an owner-answered
-checklist for the non-website accessibility standards, a combined
-Filing Pack, and an accessibility statement generator.
+book. This build ships five scanner modules (AODA FileReady,
+PostCheck ON, Loi25 Kit, Français Check, and Email Authentication
+Check) plus the **AODA Complete the Filing** expansion on top of the
+AODA scan: a remediation tracker with re-scan verification, an
+owner-answered checklist for the non-website accessibility
+standards, a combined Filing Pack, and an accessibility statement
+generator.
 
 **Honesty rule (product requirement):** NorthCheck prepares evidence.
 It does not certify compliance and is not legal advice. Every finding
@@ -47,12 +48,13 @@ deployment platform requires it — see `DEPLOY.md`.
 
 - **Landing page (`/`)** — the Ontario AODA filing deadline
   (**December 31, 2026** for employers with 20+ staff; 50+ must also
-  certify WCAG 2.0 Level AA websites) front and centre; all four
+  certify WCAG 2.0 Level AA websites) front and centre; all five
   modules shown live; founding prices (AODA evidence pack **$149**,
   monitoring **$39/month**; Complete the Filing Pack **$249**
   founding; PostCheck **$49/month**; Loi25 Kit
   **$39/month** per site; Français Check included with a scan or
-  monitoring plan); and a founding-list email capture (email +
+  monitoring plan; Email Authentication Check a free check, no
+  standalone price set); and a founding-list email capture (email +
   timestamp stored to `data/founding.json`; **no email is sent**).
 - **AODA scan (`/scan`)** — enter an http/https URL; the crawler
   follows same-domain links breadth-first up to **10 pages**, skips
@@ -124,6 +126,36 @@ deployment platform requires it — see `DEPLOY.md`.
   **notify-by = date posted + 45 days** and **retention-until = date
   posted + 3 years**. The vault page lists every saved posting with
   days remaining until notify-by (overdue dates flagged).
+- **Email Authentication Check (`/emailauth`)** — enter a domain;
+  the engine checks its public email authentication DNS records and
+  builds the same dated evidence pack. **SPF** (TXT at the domain):
+  missing record, multiple records, `+all` pass-everyone, no `all`
+  mechanism, `~all` softfail / `?all` neutral, unrecognized terms,
+  and a lookup count (includes/redirects followed through the
+  resolver, capped by depth and loop protection) over the RFC 7208
+  limit of 10. **DMARC** (TXT at `_dmarc.<domain>`): missing,
+  multiple, no/invalid policy, `p=none` monitor-only, `p=quarantine`
+  and partial `pct=` as info, missing `rua` reporting address,
+  strict alignment noted as info; `p=reject` is the pass state and
+  appears in the "What was checked" table. **DKIM**: selectors
+  cannot be enumerated from DNS, so the check tries a documented
+  list of common selectors (`default, google, selector1, selector2,
+  k1, k2, s1, s2, mail, dkim, mandrill, smtp`) at
+  `<selector>._domainkey.<domain>`; found selectors are listed with
+  their record text, an empty `p=` is flagged as a revoked key, and
+  when none resolve the finding states plainly that no record was
+  found *on the selectors checked* and DKIM may still exist under a
+  different selector name — it never claims DKIM is absent.
+  Resolution is DNS-over-HTTPS JSON (`https://dns.google/resolve`,
+  overridable with `NORTHCHECK_DOH_URL`) behind an injectable
+  resolver callable (`run_emailauth_checks(domain, resolver=…)`);
+  the test suite injects fabricated answers via a
+  `NORTHCHECK_DNS_FIXTURE` JSON file and runs fully offline. If the
+  SPF and DMARC lookups both fail, the module reports "check could
+  not be completed" and invents no findings. Free check, presented
+  as included with monitoring plans; **no standalone price has been
+  set** — the module copy cross-references TenantCheck 365 for the
+  Microsoft 365 tenant side.
 
 ## The engine
 
@@ -145,14 +177,22 @@ check. Regression fixtures live in `../northcheck/` (`demo_site.html`,
 python3 check_app.py
 ```
 
-**74 / 74 end-to-end checks passed** on 2026-11-11 (the pre-existing
-suite was 44/44 before the Complete the Filing build; all 44 still
-pass): the Phase 1 engine regression counts (demo AODA 10 findings,
-demo PostCheck 4), every pre-existing page and flow, the Loi25 engine
-on three fabricated fixture sites (bad 3 findings / good 0 / mid 1),
-the Français engine (bad 4 / good 0 / mid 1, plus the
-resolved-but-English case), both modules' forms, scan flows, stored
-records, and evidence packs — plus 30 Complete the Filing checks:
+**97 / 97 end-to-end checks passed** on 2026-11-11 (74/74 before the
+Email Authentication build; all 74 still pass): the Phase 1 engine
+regression counts (demo AODA 10 findings, demo PostCheck 4), every
+pre-existing page and flow, the Loi25 engine on three fabricated
+fixture sites (bad 3 findings / good 0 / mid 1), the Français engine
+(bad 4 / good 0 / mid 1, plus the resolved-but-English case), both
+modules' forms, scan flows, stored records, and evidence packs —
+plus 23 Email Authentication checks: fabricated DNS domains for the
+fully protected case (SPF `-all`, DMARC `p=reject` with rua, DKIM
+on selector1 → 0 findings, chain counted at 1 lookup), the
+unprotected case (SPF/DMARC missing, DKIM not found with the
+honesty wording), the partial case (`+all`, `p=none`, no rua),
+multiple-SPF and 11-include over-limit records, the
+resolver-failure path (no findings invented), and the full
+`/emailauth` HTTP flow and evidence pack — plus 30 Complete the
+Filing checks:
 re-scan comparison correctness (improving fixture site: 2 resolved /
 1 still open / 0 new; a page dropped from the crawl counts as
 not-rechecked, never resolved; duplicate findings counted with
@@ -198,6 +238,16 @@ folder.)
   changes a finding's evidence snippet without removing the
   underlying problem pattern can read as one resolved plus one new
   finding rather than one still open.
+- **Email Authentication Check sees DNS only, as served by the
+  resolver at scan time.** The SPF lookup count counts mechanism
+  terms (each `a`/`mx` counts once even though a real evaluation
+  may look further) and follows includes only while the resolver
+  answers, so it can be a floor — the results page marks it as such.
+  DKIM coverage is limited to the common selector list by design
+  (see above); a provider signing under a custom selector will read
+  as "not found on the selectors checked." The check says nothing
+  about whether mail actually aligns in practice — that evidence
+  lives in DMARC aggregate reports, which this module does not read.
 - Storage is local JSON files — fine for founding-cohort volume, not
   a multi-tenant database. No user accounts yet.
 

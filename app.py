@@ -23,6 +23,11 @@ Canadian SMB compliance platform, Phase 1 modules:
     organization's own statements and are labelled as such everywhere;
     the compliance report itself is filed by the organization on the
     Ontario portal and certified by a senior officer.
+  * Email Authentication Check — DMARC / SPF / DKIM evidence from the
+    domain's public DNS records only (DNS-over-HTTPS, no tenant or
+    mailbox access). DKIM selectors cannot be enumerated from DNS, so
+    the module checks a documented list of common selectors and says
+    exactly that when none of them resolves.
 
 Stack: Python standard library only — http.server, server-rendered
 HTML with inline CSS, no JavaScript frameworks, no external requests.
@@ -173,6 +178,7 @@ def page(title, body):
     <a href="/postcheck">PostCheck</a>
     <a href="/loi25">Loi25 Kit</a>
     <a href="/francais">Français Check</a>
+    <a href="/emailauth">Email check</a>
     <a href="/vault">Vault</a>
   </nav>
 </header>
@@ -276,6 +282,25 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   in French.</p>
   <p><strong>Included</strong> with a scan or monitoring plan.</p>
   <a class="btn" href="/francais">Check my French version</a>
+</div>
+
+<div class="card">
+  <h2>Email Authentication Check <span class="badge">Module 5 — live</span></h2>
+  <p>Spoofed email is how most small-firm fraud starts, and the defence
+  lives in three public DNS records. This check reads them the way a
+  receiving mail server does: the SPF record at your domain (missing,
+  duplicated, +all pass-everyone, or over the 10-lookup limit), the
+  DMARC policy at _dmarc (missing, monitor-only p=none, or p=reject),
+  and DKIM keys under the common selectors used by the big senders.
+  What it finds is what your DNS shows — no mailbox access, no sign-in,
+  and when DKIM uses a selector name outside the common list, the
+  report says so instead of claiming DKIM is absent.</p>
+  <p><strong>Free check</strong> · included with monitoring plans.</p>
+  <a class="btn" href="/emailauth">Check my domain's email records</a>
+  <p class="small">Run Microsoft 365 for your firm? This check covers
+  the public DNS side. The tenant side — accounts, app access,
+  insurer evidence — is what <a href="https://tenantcheck365.ca">TenantCheck 365</a>
+  checks.</p>
 </div>
 
 <div class="card" id="founding">
@@ -924,6 +949,261 @@ def francais_pack_html(record):
 
 
 # ---------------------------------------------------------------------------
+# Email Authentication Check — DMARC / SPF / DKIM from public DNS
+# ---------------------------------------------------------------------------
+# The engine does the checking (nc.run_emailauth_checks) over an
+# injectable resolver. Production uses DNS-over-HTTPS; the checker
+# sets NORTHCHECK_DNS_FIXTURE to a JSON file of fabricated answers so
+# the whole module can be verified offline:
+#   {name: {"answers": [TXT, ...]} | {"error": true}}
+
+def _fixture_resolver():
+    path = os.environ.get("NORTHCHECK_DNS_FIXTURE")
+    if not path:
+        return None
+    table = _load(path, {})
+
+    def resolve(name):
+        entry = table.get(name)
+        if entry is None:
+            return []
+        if entry.get("error"):
+            raise nc.DnsLookupError(
+                f"DNS lookup for {name} failed (fixture error)")
+        return list(entry.get("answers", []))
+
+    return resolve
+
+
+def run_emailauth_scan(domain):
+    findings, stats = nc.run_emailauth_checks(
+        domain, resolver=_fixture_resolver())
+    return _store_site_record({
+        "id": uuid.uuid4().hex[:12],
+        "module": "emailauth",
+        "start_url": stats["domain"],
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "pages": [stats["domain"]],
+        "errors": stats.get("lookup_errors", []),
+        "findings": findings,
+        "stats": stats,
+        "total_findings": len(findings),
+    })
+
+
+def emailauth_form_page(error=None):
+    err = f'<div class="notice">{escape(error)}</div>' if error else ""
+    body = f"""
+<h1>Email Authentication Check — DMARC / SPF / DKIM</h1>
+<p>Enter your domain. NorthCheck reads its public email
+authentication records — SPF at the domain, DMARC at
+_dmarc.yourdomain, and DKIM under the common selectors — and builds
+a dated evidence pack from what the DNS actually shows. No mailbox
+access, no sign-in, nothing installed.</p>
+{err}
+<div class="card">
+  <form method="post" action="/emailauth">
+    <label for="domain">Domain (for example yourbusiness.ca)</label>
+    <input type="text" id="domain" name="domain" required
+           placeholder="yourbusiness.ca">
+    <button type="submit">Run the email check</button>
+  </form>
+</div>
+<p class="small">{HONESTY_LINE} This check reports what public DNS
+records show at scan time.</p>
+"""
+    return page("Email Authentication Check", body)
+
+
+def _emailauth_rows(record):
+    s = record["stats"]
+    spf_state = "not found"
+    if s.get("spf_record"):
+        spf_state = "found"
+        if len(s.get("spf_records", [])) > 1:
+            spf_state += f" ({len(s['spf_records'])} records — invalid)"
+    lookups = s.get("spf_dns_lookups")
+    dkim_found = s.get("dkim_found", [])
+    return [
+        ("SPF record at the domain", spf_state),
+        ("SPF DNS lookups in the chain",
+         "not counted" if lookups is None else
+         str(lookups) + ("" if s.get("spf_lookup_complete")
+                         else " (floor — part of the chain could "
+                              "not be resolved)")),
+        ("DMARC policy", s.get("dmarc_policy") or
+         ("lookup failed" if s.get("dmarc_lookup_failed")
+          else "no record")),
+        ("DKIM selectors found",
+         ", ".join(d["selector"] for d in dkim_found)
+         if dkim_found else "none of the common selectors"),
+        ("DKIM selectors checked",
+         ", ".join(s.get("dkim_selectors_checked", []))),
+    ]
+
+
+def _emailauth_records_html(record):
+    s = record["stats"]
+    rows = []
+    for text in s.get("spf_records", []):
+        rows.append(("SPF · " + s["domain"], text))
+    if s.get("dmarc_record"):
+        rows.append(("DMARC · _dmarc." + s["domain"],
+                     s["dmarc_record"]))
+    for d in s.get("dkim_found", []):
+        rows.append((f"DKIM · {d['selector']}._domainkey."
+                     + s["domain"], d["record"]))
+    if not rows:
+        return ""
+    items = "".join(
+        f"<tr><td>{escape(name)}</td>"
+        f"<td><span class=\"evidence\">{escape(text)}</span></td></tr>"
+        for name, text in rows)
+    return f"""
+<div class="card">
+  <h2>Records found (as published)</h2>
+  <table>
+    <tr><th>Record</th><th>Text</th></tr>
+    {items}
+  </table>
+</div>"""
+
+
+def _emailauth_crossref_card():
+    return """
+<div class="card">
+  <h2>The other half of email safety</h2>
+  <p>This check covers the public DNS records. If your firm runs
+  Microsoft 365, the tenant itself — accounts without multi-factor
+  authentication, app access nobody remembers approving, the
+  evidence an insurer asks for at renewal — is the other half, and
+  it is what <a href="https://tenantcheck365.ca">TenantCheck 365</a>
+  checks.</p>
+</div>"""
+
+
+def emailauth_results_page(record):
+    s = record["stats"]
+    if s.get("resolution_failed"):
+        body = f"""
+<h1>Email Authentication Check results</h1>
+<p>Domain: <strong>{escape(record['start_url'])}</strong><br>
+Checked: {escape(record['timestamp'])}</p>
+<div class="card">
+  <h2>Check could not be completed</h2>
+  <p>The DNS lookups this check depends on did not answer, so there
+  are no findings to show. NorthCheck does not guess at DNS state:
+  a resolver failure is reported as a failure, not dressed up as
+  results. Try again in a few minutes.</p>
+  <p><a class="btn" href="/emailauth">Run the check again</a></p>
+</div>
+{_emailauth_crossref_card()}
+<div class="card">
+  <h2>Honesty note</h2>
+  <p class="small">{escape(nc.EMAILAUTH_STAMP)}</p>
+</div>
+"""
+        return page("Email Authentication Check results", body)
+    counts = nc.count_by_severity(record["findings"])
+    counts_line = " · ".join(
+        f"{sev} {counts[sev]}" for sev in ("high", "medium", "low", "info"))
+    stats_html = "".join(
+        f"<li><strong>{escape(k)}:</strong> {escape(v)}</li>"
+        for k, v in _emailauth_rows(record))
+    errors_html = ""
+    if record["errors"]:
+        items = "".join(f"<li>{escape(e)}</li>" for e in record["errors"])
+        errors_html = f"""
+<div class="card">
+  <h2>Lookups that failed</h2>
+  <p>These individual lookups did not answer. Sections that depend
+  on them were judged only on what resolved.</p>
+  <ul>{items}</ul>
+</div>"""
+    body = f"""
+<h1>Email Authentication Check results</h1>
+<p>Domain: <strong>{escape(record['start_url'])}</strong><br>
+Checked: {escape(record['timestamp'])} ·
+<strong>{record['total_findings']} issues to review in total</strong>
+({counts_line})</p>
+<p><a class="btn" href="/pack/{record['id']}">Download the evidence pack (HTML)</a></p>
+
+<div class="card">
+  <h2>What was checked</h2>
+  <ul>{stats_html}</ul>
+</div>
+{_emailauth_records_html(record)}
+<div class="card">
+  <h2>Issues to review</h2>
+  {findings_html(record['findings'])}
+</div>
+{errors_html}
+{_emailauth_crossref_card()}
+<div class="card">
+  <h2>Honesty note</h2>
+  <p>Every item above is an issue to review, found by deterministic
+  checks against the domain's public DNS records. A finding is not a
+  determination that mail is or is not protected, and an empty
+  findings list would not be a guarantee either. DKIM selectors
+  cannot be enumerated from DNS; this check reads the common
+  selectors listed above and says so where it matters.</p>
+  <p class="small">{escape(nc.EMAILAUTH_STAMP)}</p>
+</div>
+"""
+    return page("Email Authentication Check results", body)
+
+
+def emailauth_pack_html(record):
+    s = record["stats"]
+    date_line = record["timestamp"][:10]
+    counts = nc.count_by_severity(record["findings"])
+    counts_line = " · ".join(
+        f"{sev} {counts[sev]}" for sev in ("high", "medium", "low", "info"))
+    stats_html = "".join(
+        f"<li><strong>{escape(k)}:</strong> {escape(v)}</li>"
+        for k, v in _emailauth_rows(record))
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NorthCheck Evidence Pack — Email Authentication Check</title>
+<style>{CSS}</style>
+</head>
+<body>
+<main>
+<h1>NorthCheck Evidence Pack — Email Authentication Check</h1>
+<p><strong>{escape(nc.DRAFT_STAMP, quote=False)}</strong></p>
+<ul>
+  <li><strong>Module:</strong> Email Authentication Check —
+      DMARC / SPF / DKIM</li>
+  <li><strong>Domain:</strong> {escape(record['start_url'])}</li>
+  <li><strong>Date checked:</strong> {escape(date_line)}</li>
+  <li><strong>Total issues to review:</strong> {record['total_findings']}
+      ({counts_line})</li>
+</ul>
+<h2>What was checked</h2>
+<ul>{stats_html}</ul>
+{_emailauth_records_html(record)}
+<h2>Issues to review</h2>
+{findings_html(record['findings'])}
+<h2>Honesty note</h2>
+<p>{escape(nc.EMAILAUTH_STAMP)} Every item above is an issue to
+review, found by deterministic checks against the domain's public
+DNS records. A finding means the check matched something worth a
+human look — it is not a determination that the domain is compliant
+or non-compliant, and an empty findings list would not be a
+guarantee either. DKIM selectors cannot be enumerated from DNS;
+this check reads a documented list of common selectors, and its
+DKIM finding says exactly that.</p>
+<hr>
+<p class="small">Generated by NorthCheck. {HONESTY_LINE}</p>
+</main>
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
 # AODA Complete the Filing — checklist, Filing Pack, statement
 # ---------------------------------------------------------------------------
 
@@ -1538,6 +1818,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, _site_form_page("loi25"))
         elif path == "/francais":
             self._send(200, _site_form_page("francais"))
+        elif path == "/emailauth":
+            self._send(200, emailauth_form_page())
         elif path == "/postcheck":
             self._send(200, postcheck_form_page())
         elif path == "/vault":
@@ -1555,6 +1837,8 @@ class Handler(BaseHTTPRequestHandler):
                     pack = loi25_pack_html(record)
                 elif module == "francais":
                     pack = francais_pack_html(record)
+                elif module == "emailauth":
+                    pack = emailauth_pack_html(record)
                 else:
                     pack = evidence_pack_html(record)
                 self._send(
@@ -1650,6 +1934,18 @@ class Handler(BaseHTTPRequestHandler):
                     f"({detail}). Check the URL and try again."))
                 return
             self._send(200, results(record))
+        elif path == "/emailauth":
+            domain = nc.normalize_domain(form.get("domain") or "")
+            if not re.fullmatch(
+                    r"[a-z0-9]([a-z0-9-]*[a-z0-9])?"
+                    r"(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+", domain):
+                self._send(400, emailauth_form_page(
+                    "Enter a domain like yourbusiness.ca — a website "
+                    "address works too, the domain is what gets "
+                    "checked."))
+                return
+            record = run_emailauth_scan(domain)
+            self._send(200, emailauth_results_page(record))
         elif path == "/postcheck":
             title = (form.get("title") or "").strip() or "Untitled posting"
             employer = (form.get("employer") or "").strip() \
