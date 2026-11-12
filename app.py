@@ -72,6 +72,8 @@ MAX_BODY = 2_000_000      # bytes per fetched page
 HONESTY_LINE = ("NorthCheck prepares evidence. It does not certify "
                 "compliance and is not legal advice.")
 
+BASE_URL = "https://getnorthcheck.ca"
+
 # ---------------------------------------------------------------------------
 # JSON stores (created at runtime)
 # ---------------------------------------------------------------------------
@@ -160,13 +162,230 @@ footer.site { max-width: 880px; margin: 0 auto; padding: 0 20px 40px;
 """
 
 
-def page(title, body):
+# ---------------------------------------------------------------------------
+# Search and sharing metadata (SEO)
+# ---------------------------------------------------------------------------
+
+# Per-page metadata, keyed by the title each page passes to page().
+# "path" is the page's canonical public path. Result views have
+# per-record URLs, so they carry a description but no canonical.
+PAGE_SEO = {
+    "AODA compliance report — December 31, 2026 deadline": {
+        "path": "/",
+        "description":
+            "Ontario's AODA accessibility compliance report is due "
+            "December 31, 2026. Run the free website scan and get a "
+            "dated evidence pack for your senior officer.",
+    },
+    "AODA website scan": {
+        "path": "/scan",
+        "description":
+            "Scan your website free for the December 31, 2026 AODA "
+            "filing: up to 10 pages crawled, deterministic WCAG 2.0 "
+            "checks, and a dated evidence pack to review.",
+    },
+    "AODA compliance report — due December 31, 2026": {
+        "path": "/aoda-compliance-report",
+        "description":
+            "What Ontario organizations with 20 or more employees "
+            "must file by December 31, 2026, what the AODA compliance "
+            "report asks, and how NorthCheck can help.",
+    },
+    "Complete the Filing — checklist": {
+        "path": "/filing",
+        "description":
+            "Complete the AODA filing: an owner-answered checklist "
+            "for the non-website standards, a remediation tracker "
+            "verified by re-scan, and one full Filing Pack.",
+    },
+    "Loi25 Kit — website check": {
+        "path": "/loi25",
+        "description":
+            "Quebec Law 25 website check: a privacy policy linked "
+            "from your homepage, a named privacy officer, a cookie "
+            "consent mechanism, and a French privacy policy.",
+    },
+    "Français Check — French version check": {
+        "path": "/francais",
+        "description":
+            "Français Check verifies that a real French version of "
+            "your site exists: a French entry point, hreflang links, "
+            "and French home, contact and privacy pages.",
+    },
+    "Email Authentication Check": {
+        "path": "/emailauth",
+        "description":
+            "Check your domain's DMARC, SPF and DKIM records, free: "
+            "read exactly the way a receiving mail server reads "
+            "them, with a dated evidence pack of results.",
+    },
+    "PostCheck ON": {
+        "path": "/postcheck",
+        "description":
+            "Check a job posting against Ontario's January 1, 2026 "
+            "posting rules: the pay range cap, AI screening "
+            "disclosure, vacancy statement, and the records rule.",
+    },
+    "Posting vault": {
+        "path": "/vault",
+        "description":
+            "The PostCheck vault: your saved Ontario job postings "
+            "with their clocks running — notify interviewed "
+            "applicants within 45 days, keep records for 3 years.",
+    },
+    "Scan results": {
+        "description":
+            "Your AODA scan results: WCAG 2.0 issues to review on "
+            "the pages scanned, with a dated evidence pack. "
+            "NorthCheck prepares evidence; it does not certify.",
+    },
+    "Loi25 Kit results": {
+        "description":
+            "Your Loi25 Kit results: what your public website shows "
+            "for Quebec's Law 25, issue by issue, with a dated "
+            "evidence pack. Evidence, not a certification.",
+    },
+    "Français Check results": {
+        "description":
+            "Your Français Check results: whether a real French "
+            "version of your site exists and its key pages resolve "
+            "in French, page by page, with an evidence pack.",
+    },
+    "Email Authentication Check results": {
+        "description":
+            "Your Email Authentication Check results: the DMARC, "
+            "SPF and DKIM records that public DNS showed at scan "
+            "time, with a full dated evidence pack for review.",
+    },
+    "PostCheck results": {
+        "description":
+            "Your PostCheck results: how the posting reads against "
+            "Ontario's January 1, 2026 posting rules, with suggested "
+            "corrections and its 45-day and 3-year clocks.",
+    },
+    "Filing Pack": {
+        "description":
+            "Your Filing Pack: website scan evidence combined with "
+            "your organization's own owner-stated checklist answers, "
+            "ready for a senior officer's final review.",
+    },
+}
+
+# The public GET pages a crawler may index: the form and explainer
+# pages only — never result views or downloads, whose URLs carry
+# record ids.
+SITEMAP_PATHS = ["/", "/aoda-compliance-report", "/scan", "/filing",
+                 "/loi25", "/francais", "/emailauth", "/postcheck",
+                 "/vault"]
+
+
+def sitemap_xml():
+    urls = "".join(f"  <url><loc>{BASE_URL}{p}</loc></url>\n"
+                   for p in SITEMAP_PATHS)
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/'
+            'sitemap/0.9">\n' + urls + "</urlset>\n")
+
+
+def robots_txt():
+    return ("User-agent: *\nAllow: /\n"
+            f"Sitemap: {BASE_URL}/sitemap.xml\n")
+
+
+def _json_ld(data):
+    return ('<script type="application/ld+json">'
+            + json.dumps(data, ensure_ascii=False) + "</script>")
+
+
+def home_json_ld():
+    """Homepage structured data: the organization, plus a FAQ whose
+    answers restate only facts and prices already shown on the page
+    (the deadline box, the module cards, the filing copy)."""
+    org = {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "NorthCheck",
+        "url": BASE_URL + "/",
+        "description": PAGE_SEO[
+            "AODA compliance report — December 31, 2026 deadline"
+        ]["description"],
+    }
+    faq_pairs = [
+        ("When is Ontario's AODA accessibility compliance report "
+         "due?",
+         "December 31, 2026. Ontario businesses and non-profits with "
+         "20 or more employees must file an accessibility compliance "
+         "report by December 31, 2026."),
+        ("Who has to file an AODA compliance report?",
+         "Ontario businesses and non-profits with 20 or more "
+         "employees. Those with 50 or more employees must also "
+         "certify that their websites meet WCAG 2.0 Level AA."),
+        ("What does the AODA compliance report ask about?",
+         "Every part of the Integrated Accessibility Standards "
+         "Regulation: the General requirements, Information and "
+         "Communications, Employment, Transportation (only if you "
+         "provide transportation services), the Design of Public "
+         "Spaces, and Customer Service — and it must be certified by "
+         "a senior officer."),
+        ("Does NorthCheck file or certify the report?",
+         "No. The report itself is filed by your organization "
+         "through the Ontario government's Accessibility Compliance "
+         "Reporting portal and certified by a senior officer. "
+         "NorthCheck prepares the evidence a senior officer reviews "
+         "before signing; it does not certify compliance and is not "
+         "legal advice."),
+        ("How much does NorthCheck cost?",
+         "Founding prices shown on this page: the AODA evidence pack "
+         "is $149, monitoring is $39/month, PostCheck ON is "
+         "$49/month, and the Complete Filing Pack is $249."),
+    ]
+    faq = {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {"@type": "Question", "name": q,
+             "acceptedAnswer": {"@type": "Answer", "text": a}}
+            for q, a in faq_pairs],
+    }
+    return _json_ld(org) + "\n" + _json_ld(faq)
+
+
+def page(title, body, extra_head=""):
+    full_title = f"{title} — NorthCheck"
+    seo = PAGE_SEO.get(title, {})
+    description = seo.get("description")
+    path = seo.get("path")
+    head_extra = ""
+    if description:
+        head_extra += (f'\n<meta name="description" '
+                       f'content="{escape(description, quote=True)}">')
+    if path:
+        head_extra += (f'\n<link rel="canonical" '
+                       f'href="{BASE_URL}{path}">')
+    if description:
+        head_extra += (
+            f'\n<meta property="og:title" '
+            f'content="{escape(full_title, quote=True)}">'
+            f'\n<meta property="og:description" '
+            f'content="{escape(description, quote=True)}">'
+            '\n<meta property="og:type" content="website">')
+        if path:
+            head_extra += (f'\n<meta property="og:url" '
+                           f'content="{BASE_URL}{path}">')
+        head_extra += (
+            '\n<meta name="twitter:card" content="summary">'
+            f'\n<meta name="twitter:title" '
+            f'content="{escape(full_title, quote=True)}">'
+            f'\n<meta name="twitter:description" '
+            f'content="{escape(description, quote=True)}">')
+    if extra_head:
+        head_extra += "\n" + extra_head
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{escape(title)} — NorthCheck</title>
+<title>{escape(full_title)}</title>{head_extra}
 <style>{CSS}</style>
 </head>
 <body>
@@ -235,6 +454,8 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   remaining gaps, and a publish-ready accessibility statement for
   your site. <strong>Founding price: $249</strong> for the Complete
   Filing Pack.</p>
+  <p><a href="/aoda-compliance-report">What the December 31, 2026
+  compliance report requires, in full</a></p>
   <a class="btn" href="/filing">Complete the Filing checklist</a>
   <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249</a><br>
   <a class="btn" href="/scan">Scan my website</a>
@@ -320,7 +541,72 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
 <p class="small">{HONESTY_LINE} Every finding is an issue to review,
 found by deterministic checks — never a certification.</p>
 """
-    return page("Canadian SMB compliance, checked", body)
+    return page("AODA compliance report — December 31, 2026 deadline",
+                body, extra_head=home_json_ld())
+
+
+# ---------------------------------------------------------------------------
+# AODA compliance report — deadline landing page
+# ---------------------------------------------------------------------------
+
+def aoda_report_page():
+    body = f"""
+<h1>AODA compliance report — due December 31, 2026</h1>
+<p>Ontario's accessibility law asks covered organizations to file an
+accessibility compliance report — and the next one is due
+<strong>December 31, 2026</strong>.</p>
+
+<div class="deadline">
+  <strong>Who must file:</strong> Ontario businesses and non-profits
+  with 20 or more employees must file an accessibility compliance
+  report by December 31, 2026 — and those with 50 or more must also
+  certify that their websites meet WCAG 2.0 Level AA. Giving false or
+  misleading information in the report is an offence, and a senior
+  officer signs it. An overlay widget does not produce filing
+  evidence. A scan with a dated evidence pack does.
+</div>
+
+<div class="card">
+  <h2>What the report asks</h2>
+  <p>The December 31, 2026 accessibility compliance report asks about
+  every part of the Integrated Accessibility Standards Regulation —
+  the General requirements, Information and Communications,
+  Employment, Transportation (only if you provide transportation
+  services), the Design of Public Spaces, and Customer Service —
+  and it must be certified by a senior officer. The website is one
+  part of it, not the whole report.</p>
+</div>
+
+<div class="card">
+  <h2>How NorthCheck fits</h2>
+  <p><strong>Start with the free scan.</strong> Point the
+  <a href="/scan">AODA scanner</a> at your website: it crawls up to
+  {MAX_PAGES} pages, runs the deterministic WCAG 2.0 checks, and
+  builds a dated evidence pack. <strong>Founding price: $149</strong>
+  per evidence pack · <strong>$39/month</strong> monitoring with
+  re-scan alerts.</p>
+  <p><strong>The report covers more than the website.</strong> The
+  <a href="/filing">Complete the Filing Pack</a> (<strong>founding
+  price: $249</strong>) adds a remediation tracker — a finding counts
+  as fixed only when a re-scan verifies it is gone, never on a
+  say-so — an owner-answered checklist for the non-website
+  standards, one Filing Pack that combines the website evidence with
+  those answers and the remaining gaps, and a publish-ready
+  accessibility statement for your site.</p>
+  <a class="btn" href="/scan">Scan my website</a>
+  <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149</a><br>
+  <a class="btn" href="/filing">Complete the Filing checklist</a>
+  <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249</a>
+</div>
+
+<div class="card">
+  <h2>Who files, who certifies</h2>
+  <p>{escape(nc.FILING_CERTIFICATION_NOTE)}</p>
+  <p class="small">{HONESTY_LINE} Every finding is an issue to review,
+  found by deterministic checks — never a certification.</p>
+</div>
+"""
+    return page("AODA compliance report — due December 31, 2026", body)
 
 
 # ---------------------------------------------------------------------------
@@ -1774,6 +2060,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             joined = query.get("joined", [""])[0] == "1"
             self._send(200, landing_page(joined=joined))
+        elif path == "/aoda-compliance-report":
+            self._send(200, aoda_report_page())
+        elif path == "/sitemap.xml":
+            self._send(200, sitemap_xml(),
+                       content_type="application/xml; charset=utf-8")
+        elif path == "/robots.txt":
+            self._send(200, robots_txt(),
+                       content_type="text/plain; charset=utf-8")
         elif path == "/scan":
             self._send(200, scan_form_page())
         elif path == "/filing":
