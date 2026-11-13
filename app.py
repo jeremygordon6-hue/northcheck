@@ -28,6 +28,16 @@ Canadian SMB compliance platform, Phase 1 modules:
     mailbox access). DKIM selectors cannot be enumerated from DNS, so
     the module checks a documented list of common selectors and says
     exactly that when none of them resolves.
+  * Tracker and Consent Check — known tracker / ad-tag signatures,
+    consent-platform signatures and Google Consent Mode signals in
+    the HTML exactly as served. No JavaScript is run, so the module
+    reports what the page source shows and never claims to prove
+    when a tag fires in a real browser.
+  * ADA Title II Check — WCAG 2.1 Level AA evidence for US state and
+    local government websites under the Department of Justice's ADA
+    Title II rule. The April 26, 2027 / April 26, 2028 deadlines are
+    stated as "under the current DOJ rule". Free check; no price is
+    set for this module.
 
 Stack: Python standard library only — http.server, server-rendered
 HTML with inline CSS, no JavaScript frameworks, no external requests.
@@ -219,6 +229,20 @@ PAGE_SEO = {
             "read exactly the way a receiving mail server reads "
             "them, with a dated evidence pack of results.",
     },
+    "Tracker and Consent Check": {
+        "path": "/trackers",
+        "description":
+            "Free check: which ad trackers and marketing tags your "
+            "website loads, and whether a consent banner or Google "
+            "Consent Mode appears in the page source today.",
+    },
+    "ADA Title II Check": {
+        "path": "/ada",
+        "description":
+            "Free ADA Title II website check for US state and local "
+            "governments: WCAG 2.1 AA issues to review, a dated "
+            "evidence pack, and the April 2027 and 2028 deadlines.",
+    },
     "PostCheck ON": {
         "path": "/postcheck",
         "description":
@@ -257,6 +281,18 @@ PAGE_SEO = {
             "SPF and DKIM records that public DNS showed at scan "
             "time, with a full dated evidence pack for review.",
     },
+    "Tracker and Consent Check results": {
+        "description":
+            "Your Tracker and Consent Check results: the trackers "
+            "found in your site's page source, the consent signals "
+            "detected, and a full dated evidence pack for review.",
+    },
+    "ADA Title II Check results": {
+        "description":
+            "Your ADA Title II Check results: WCAG 2.1 AA issues "
+            "to review on your public website, page by page, with "
+            "a dated evidence pack. Evidence, not certification.",
+    },
     "PostCheck results": {
         "description":
             "Your PostCheck results: how the posting reads against "
@@ -275,8 +311,8 @@ PAGE_SEO = {
 # pages only — never result views or downloads, whose URLs carry
 # record ids.
 SITEMAP_PATHS = ["/", "/aoda-compliance-report", "/scan", "/filing",
-                 "/loi25", "/francais", "/emailauth", "/postcheck",
-                 "/vault"]
+                 "/loi25", "/francais", "/emailauth", "/trackers",
+                 "/ada", "/postcheck", "/vault"]
 
 
 def sitemap_xml():
@@ -402,6 +438,8 @@ def page(title, body, extra_head=""):
     <a href="/loi25">Loi25 Kit</a>
     <a href="/francais">Français Check</a>
     <a href="/emailauth">Email check</a>
+    <a href="/trackers">Tracker check</a>
+    <a href="/ada">ADA (US)</a>
     <a href="/vault">Vault</a>
   </nav>
 </header>
@@ -526,6 +564,46 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   the public DNS side. The tenant side — accounts, app access,
   insurer evidence — is what <a href="https://tenantcheck365.ca">TenantCheck 365</a>
   checks.</p>
+</div>
+
+<div class="card">
+  <h2>Tracker and Consent Check <span class="badge">Module 6 — live</span></h2>
+  <p>Most sites load advertising trackers the moment a page opens.
+  This check reads your site's HTML exactly as served and reports
+  what is actually in the source: the known trackers and marketing
+  tags (Google Analytics, Tag Manager, Meta Pixel, Google Ads,
+  TikTok, LinkedIn, Hotjar, Microsoft Clarity and similar), whether
+  any consent mechanism shows with them (a consent platform like
+  OneTrust or Cookiebot, banner markup, consent wording), and
+  whether Google Consent Mode signals appear alongside the Google
+  tags. It runs no JavaScript, so it never claims to prove when a
+  tag fires in a real browser — it shows you the tags and the
+  consent signals, side by side, as dated evidence you can act
+  on.</p>
+  <p><strong>Free check</strong> · included with monitoring plans.</p>
+  <a class="btn" href="/trackers">Check my site's trackers</a>
+</div>
+
+<div class="card">
+  <h2>ADA Title II Check (US) <span class="badge">Module 7 — live</span></h2>
+  <p>US state and local governments face the same shape of rule
+  under the Americans with Disabilities Act: the Department of
+  Justice's Title II rule requires their websites and mobile apps
+  to conform to WCAG 2.1 Level AA. Under the current DOJ rule, the
+  deadline is <strong>April 26, 2027</strong> for public entities
+  serving a population of 50,000 or more, and
+  <strong>April 26, 2028</strong> for smaller public entities and
+  special district
+  governments. This check crawls up to 10 pages of a public site
+  and runs the WCAG 2.1 checks the HTML as served honestly
+  supports — the carried-over page criteria plus 2.1's own
+  input-purpose criterion, frame titles and zoom settings — then
+  builds the same dated evidence pack as every NorthCheck module.
+  What the scan cannot read (the inside of PDF documents, app
+  behaviour, anything that needs rendering) is named in the
+  results, not skipped over.</p>
+  <p><strong>Free check</strong> · new US module.</p>
+  <a class="btn" href="/ada">Run the ADA Title II check</a>
 </div>
 
 <div class="card" id="founding">
@@ -1034,6 +1112,18 @@ def _site_form_page(module, error=None):
                  "privacy officer or privacy contact, a cookie consent "
                  "mechanism, and a French version of the privacy policy.")
         action, cta = "/loi25", "Run the Loi25 check"
+    elif module == "trackers":
+        title = "Tracker and Consent Check"
+        intro = ("Enter your website address. NorthCheck crawls up "
+                 f"to {MAX_PAGES} pages on the same domain and reads "
+                 "the HTML exactly as served: the known trackers "
+                 "and marketing tags in the page source, whether a "
+                 "consent platform, banner or consent wording shows "
+                 "with them, and whether Google Consent Mode signals "
+                 "appear. No JavaScript is run, so the check reports "
+                 "what the source shows — never a claim about when "
+                 "a tag fires in a real browser.")
+        action, cta = "/trackers", "Run the tracker check"
     else:
         title = "Français Check — French version check"
         intro = ("Enter your website address. NorthCheck crawls up to "
@@ -1236,6 +1326,101 @@ def francais_pack_html(record):
              for a in record["attempts"]]
     return _site_pack_html(record, "Français Check — French version "
                                    "reachability", rows)
+
+
+# ---------------------------------------------------------------------------
+# ADA Title II Check — WCAG 2.1 AA evidence for US public websites
+# ---------------------------------------------------------------------------
+# Same shape as the other site modules: the shared crawler fetches
+# the pages, the engine checks them (nc.run_ada_checks), and the
+# shared results / pack renderers present the findings. The module
+# is a free check — no price is set and no payment link exists for
+# it. Deadline dates are stated throughout as "under the current
+# DOJ rule" (see the engine's module notes for why).
+
+def run_ada_scan(start_url):
+    pages, errors = crawl(start_url)
+    findings, stats = (nc.run_ada_checks(pages) if pages
+                       else ([], {}))
+    return _store_site_record({
+        "id": uuid.uuid4().hex[:12],
+        "module": "ada",
+        "start_url": start_url,
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "pages": [p["url"] for p in pages],
+        "errors": errors,
+        "findings": findings,
+        "stats": stats,
+        "total_findings": len(findings),
+    })
+
+
+def _ada_stats_rows(record):
+    s = record["stats"]
+    return [
+        ("Title II deadline — entities serving 50,000 or more",
+         f"{nc.ADA_DEADLINE_LARGE}, under the current DOJ rule"),
+        ("Title II deadline — smaller entities and special districts",
+         f"{nc.ADA_DEADLINE_SMALL}, under the current DOJ rule"),
+        ("Pages scanned", str(s.get("pages_scanned", 0))),
+        ("Pages with at least one issue",
+         str(s.get("pages_with_findings", 0))),
+        ("Accessibility statement / ADA contact found",
+         _yesno(s.get("statement_found"))),
+        ("PDF documents linked (not checked)",
+         str(s.get("pdf_links", 0))),
+    ]
+
+
+def ada_form_page(error=None):
+    err = f'<div class="notice">{escape(error)}</div>' if error else ""
+    body = f"""
+<h1>ADA Title II Check — US public websites</h1>
+<p>Enter the website address of a US state or local government
+entity. NorthCheck crawls up to {MAX_PAGES} pages on the same domain
+and checks the WCAG 2.1 Level AA issues the HTML as served can
+honestly show, then builds a dated evidence pack. Under the
+current DOJ rule, public entities serving a population of 50,000 or more
+must conform by <strong>{nc.ADA_DEADLINE_LARGE}</strong>, and
+smaller public entities and special district governments by
+<strong>{nc.ADA_DEADLINE_SMALL}</strong>.</p>
+{err}
+<div class="card">
+  <form method="post" action="/ada">
+    <label for="url">Website URL (http or https)</label>
+    <input type="url" id="url" name="url" required
+           placeholder="https://www.yourcity.gov">
+    <button type="submit">Run the ADA Title II check</button>
+  </form>
+</div>
+<p class="small">{HONESTY_LINE}</p>
+"""
+    return page("ADA Title II Check", body)
+
+
+def ada_results_page(record):
+    extra = f"""
+<div class="card">
+  <h2>Which deadline applies</h2>
+  <p>Under the US Department of Justice's current ADA Title II web
+  and mobile app rule, a public entity serving a population of
+  50,000 or more must conform by <strong>{nc.ADA_DEADLINE_LARGE}</strong>;
+  smaller public entities and special district governments by
+  <strong>{nc.ADA_DEADLINE_SMALL}</strong>. The standard is WCAG
+  2.1 Level AA. The 2027 and 2028 dates come from the Department's
+  April 2026 Interim Final Rule — confirm the date that applies to
+  your entity with your own legal counsel before relying on this
+  pack. NorthCheck prepares evidence; it does not certify
+  compliance and is not legal advice.</p>
+</div>"""
+    return _site_results_page(record, "ADA Title II Check results",
+                              _ada_stats_rows(record), extra_card=extra)
+
+
+def ada_pack_html(record):
+    return _site_pack_html(
+        record, "ADA Title II Check — US ADA Title II website "
+                "evidence", _ada_stats_rows(record))
 
 
 # ---------------------------------------------------------------------------
@@ -1491,6 +1676,101 @@ DKIM finding says exactly that.</p>
 </body>
 </html>
 """
+
+
+# ---------------------------------------------------------------------------
+# Tracker and Consent Check — trackers vs consent in the served HTML
+# ---------------------------------------------------------------------------
+# The engine does the checking (nc.run_trackers_checks) over the same
+# crawl the other site modules use. Detection is over the HTML
+# exactly as served: tracker and consent-platform signatures plus
+# Google Consent Mode signals. No JavaScript is run, so the results
+# report what the page source shows and say, in the module stamp,
+# that the check cannot show when a tag fires in a real browser.
+
+def run_trackers_scan(start_url):
+    pages, errors = crawl(start_url)
+    findings, stats = (nc.run_trackers_checks(pages) if pages
+                       else ([], {}))
+    return _store_site_record({
+        "id": uuid.uuid4().hex[:12],
+        "module": "trackers",
+        "start_url": start_url,
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "pages": [p["url"] for p in pages],
+        "errors": errors,
+        "findings": findings,
+        "stats": stats,
+        "total_findings": len(findings),
+    })
+
+
+def _trackers_rows(record):
+    s = record["stats"]
+    trackers = s.get("trackers_found", [])
+    mech = []
+    if s.get("consent_platforms"):
+        mech.append("platform: " + ", ".join(s["consent_platforms"]))
+    if s.get("banner_detected"):
+        mech.append("banner markup")
+    if s.get("consent_wording_found"):
+        mech.append("consent wording")
+    cm = "not found"
+    if s.get("consent_mode_found"):
+        calls = ", ".join(s.get("consent_mode_calls", []))
+        cm = "found" + (f" ({calls} call)" if calls else
+                        " (storage settings present)")
+    return [
+        ("Trackers found in the page source",
+         ", ".join(trackers) if trackers
+         else "none of the known signatures"),
+        ("Google tags among them",
+         _yesno(s.get("google_tags_found"))),
+        ("Consent mechanism detected",
+         ("yes — " + "; ".join(mech)) if mech else "no"),
+        ("Google Consent Mode signals", cm),
+    ]
+
+
+def _trackers_detail_card(record):
+    detail = record["stats"].get("trackers_detail", [])
+    if not detail:
+        return ""
+    rows = "".join(f"""
+<tr>
+  <td>{escape(t['name'])}</td>
+  <td>{escape(', '.join(t['pages']))}</td>
+  <td><span class="evidence">{escape(', '.join(t['markers']))}</span></td>
+</tr>""" for t in detail)
+    return f"""
+<div class="card">
+  <h2>Trackers detected in the page source</h2>
+  <table>
+    <tr><th>Tracker</th><th>Seen on page(s)</th>
+        <th>Signature matched</th></tr>
+    {rows}
+  </table>
+  <p class="small">{escape(nc.TRACKERS_STAMP)}</p>
+</div>"""
+
+
+def trackers_results_page(record):
+    return _site_results_page(
+        record, "Tracker and Consent Check results",
+        _trackers_rows(record),
+        extra_card=_trackers_detail_card(record))
+
+
+def trackers_pack_html(record):
+    rows = _trackers_rows(record)
+    rows += [(t["name"] + " — signature matched",
+              ", ".join(t["markers"]) + " · seen on "
+              + ", ".join(t["pages"]))
+             for t in record["stats"].get("trackers_detail", [])]
+    return _site_pack_html(
+        record,
+        "Tracker and Consent Check — trackers and consent signals",
+        rows)
 
 
 # ---------------------------------------------------------------------------
@@ -2118,6 +2398,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, _site_form_page("francais"))
         elif path == "/emailauth":
             self._send(200, emailauth_form_page())
+        elif path == "/ada":
+            self._send(200, ada_form_page())
+        elif path == "/trackers":
+            self._send(200, _site_form_page("trackers"))
         elif path == "/postcheck":
             self._send(200, postcheck_form_page())
         elif path == "/vault":
@@ -2137,6 +2421,10 @@ class Handler(BaseHTTPRequestHandler):
                     pack = francais_pack_html(record)
                 elif module == "emailauth":
                     pack = emailauth_pack_html(record)
+                elif module == "ada":
+                    pack = ada_pack_html(record)
+                elif module == "trackers":
+                    pack = trackers_pack_html(record)
                 else:
                     pack = evidence_pack_html(record)
                 self._send(
@@ -2210,7 +2498,7 @@ class Handler(BaseHTTPRequestHandler):
                     f"({detail}). Check the URL and try again."))
                 return
             self._send(200, scan_results_page(record))
-        elif path in ("/loi25", "/francais"):
+        elif path in ("/loi25", "/francais", "/trackers"):
             module = path.lstrip("/")
             url = (form.get("url") or "").strip()
             if not url.startswith(("http://", "https://")):
@@ -2221,6 +2509,9 @@ class Handler(BaseHTTPRequestHandler):
             if module == "loi25":
                 record = run_loi25_scan(url)
                 results = loi25_results_page
+            elif module == "trackers":
+                record = run_trackers_scan(url)
+                results = trackers_results_page
             else:
                 record = run_francais_scan(url)
                 results = francais_results_page
@@ -2244,6 +2535,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             record = run_emailauth_scan(domain)
             self._send(200, emailauth_results_page(record))
+        elif path == "/ada":
+            url = (form.get("url") or "").strip()
+            if not url.startswith(("http://", "https://")):
+                self._send(400, ada_form_page(
+                    "Enter a full URL starting with http:// or "
+                    "https://"))
+                return
+            record = run_ada_scan(url)
+            if not record["pages"]:
+                detail = "; ".join(record["errors"]) or "no pages read"
+                self._send(400, ada_form_page(
+                    f"No HTML pages could be scanned at that address "
+                    f"({detail}). Check the URL and try again."))
+                return
+            self._send(200, ada_results_page(record))
         elif path == "/postcheck":
             title = (form.get("title") or "").strip() or "Untitled posting"
             employer = (form.get("employer") or "").strip() \
