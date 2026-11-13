@@ -40,6 +40,21 @@ ports, then asserts:
     the /ada form and scan flow, its evidence pack, and the
     deadline copy (April 26, 2027 / April 26, 2028, stated as under
     the current DOJ rule, with no price or payment link).
+  * Privacy Register: the create flow, incident and request entry
+    POSTs persisting and re-rendering (with the +30-day response
+    window), the register pack (entries, DRAFT stamp, owner-stated
+    labels, not-verified stamp), and clean 400s on bad input.
+  * Compliance Calendar: the page renders every deadline from the
+    engine table (AODA Dec 31, 2026 + 3-year cycle, plan review
+    cadence, Ontario posting duties as ongoing, Loi25 ongoing
+    duties, both ADA dates under the current DOJ rule), the honest
+    monitoring note, and the bundle section at existing prices
+    with no Stripe link anywhere on the page.
+  * Evidence Binder: assembly from stored fixture scans (included
+    vs "no scan on file" modules correct), the no-scans site
+    refused honestly, the senior-officer sign-off (rejected
+    without the statement checkbox; persisted and printed in the
+    pack once given), and one combined pack document.
   * SEO layer: per-page meta descriptions / Open Graph / canonical
     tags, homepage JSON-LD (Organization + FAQPage), /sitemap.xml and
     /robots.txt, and the /aoda-compliance-report deadline landing
@@ -478,6 +493,20 @@ def last_scan_record():
 def last_checklist_record():
     import json as _json
     with open(os.path.join(DATA_DIR, "checklists.json"),
+              encoding="utf-8") as fh:
+        return _json.load(fh)[-1]
+
+
+def last_register_record():
+    import json as _json
+    with open(os.path.join(DATA_DIR, "registers.json"),
+              encoding="utf-8") as fh:
+        return _json.load(fh)[-1]
+
+
+def last_binder_record():
+    import json as _json
+    with open(os.path.join(DATA_DIR, "binders.json"),
               encoding="utf-8") as fh:
         return _json.load(fh)[-1]
 
@@ -1155,6 +1184,240 @@ def app_ada_checks():
     check("ADA scan rejects a URL without scheme (400)", s == 400)
 
 
+def app_register_checks():
+    print("App — Privacy Register")
+    s, body = get("/")
+    check("landing shows Privacy Register as Module 8 live",
+          "Privacy Register" in body and "Module 8 — live" in body)
+    check("landing presents it as a free tool linking /register "
+          "with no payment link (Stripe count unchanged at 4)",
+          "Free tool" in body and 'href="/register"' in body
+          and body.count("buy.stripe.com") == 4,
+          f"count {body.count('buy.stripe.com')}")
+    check("landing Loi25 card now points at the register tool and "
+          "keeps the scan honest",
+          "Privacy Register" in body
+          and "neither checks nor implies" in body)
+    s, body = get("/register")
+    check("/register 200 with create form",
+          s == 200 and 'name="org_name"' in body
+          and 'name="website"' in body)
+    check("/register states the owner-stated honesty line",
+          "does not verify them" in body
+          or "has not verified" in body)
+
+    s, body = post("/register", {"org_name": "Register Fixture Inc.",
+                                  "website": FIX + "/good/"})
+    check("register create lands on the entries view",
+          s == 200 and "Register Fixture Inc." in body
+          and "Log an incident" in body, f"status {s}")
+    rec = last_register_record()
+    rid = rec["id"]
+    check("register record persisted with empty entry lists",
+          rec.get("org_name") == "Register Fixture Inc."
+          and rec.get("incidents") == []
+          and rec.get("requests") == [])
+
+    s, body = post("/register/incident", {
+        "register_id": rid,
+        "date_discovered": "2026-11-09",
+        "incident_type": nc.REGISTER_INCIDENT_TYPES[0],
+        "description": "Fixture incident: a test mailbox was "
+                       "accessed by an unknown sign-in.",
+        "affected": "about 3 test records",
+        "containment": "password reset and sessions revoked",
+        "regulator_notified": "Yes",
+        "regulator_date": "2026-11-10",
+        "individuals_notified": "Not yet",
+        "individuals_date": "",
+    })
+    check("incident POST persists and re-renders in the view",
+          s == 200 and "Fixture incident" in body
+          and "2026-11-10" in body, f"status {s}")
+    rec = last_register_record()
+    check("incident stored on the register record",
+          len(rec.get("incidents", [])) == 1
+          and rec["incidents"][0]["description"].startswith(
+              "Fixture incident")
+          and rec["incidents"][0]["regulator_notified"] == "Yes")
+
+    s, body = post("/register/request", {
+        "register_id": rid,
+        "date_received": "2026-11-01",
+        "requester_type": nc.REGISTER_REQUESTER_TYPES[0],
+        "request_type": nc.REGISTER_REQUEST_TYPES[0],
+        "status": nc.REGISTER_REQUEST_STATUSES[0],
+        "date_completed": "",
+    })
+    check("request POST persists and shows the 30-day window date",
+          s == 200 and "2026-12-01" in body, f"status {s}")
+    rec = last_register_record()
+    check("request stored with its computed due date",
+          len(rec.get("requests", [])) == 1
+          and rec["requests"][0]["due_date"] == "2026-12-01")
+
+    s, body = get(f"/register/pack/{rid}")
+    check("register pack 200 with the entries, DRAFT stamp and "
+          "owner-stated labels",
+          s == 200 and "Fixture incident" in body
+          and "DRAFT" in body and "owner stated" in body
+          and "has not verified any entry" in body
+          and "2026-12-01" in body)
+    s, body = post("/register/incident", {
+        "register_id": rid,
+        "date_discovered": "not-a-date",
+        "incident_type": nc.REGISTER_INCIDENT_TYPES[0],
+        "description": "bad date should be rejected",
+    })
+    check("incident with an unreadable date is rejected (400)",
+          s == 400)
+    s, body = post("/register/incident", {
+        "register_id": rid,
+        "date_discovered": "2026-11-09",
+        "incident_type": nc.REGISTER_INCIDENT_TYPES[0],
+        "description": "",
+    })
+    check("incident without a description is rejected (400)",
+          s == 400)
+    rec = last_register_record()
+    check("rejected incidents were not stored",
+          len(rec.get("incidents", [])) == 1)
+    s, body = post("/register", {"org_name": "No Scheme Co",
+                                  "website": "example.com"})
+    check("register create rejects a website without scheme (400)",
+          s == 400)
+
+
+def app_calendar_checks():
+    print("App — Compliance Calendar")
+    s, body = get("/")
+    check("landing links the compliance calendar",
+          'href="/calendar"' in body)
+    s, body = get("/calendar")
+    check("/calendar 200", s == 200)
+    check("calendar states the AODA December 31, 2026 deadline "
+          "and the 3-year cycle",
+          "December 31, 2026" in body and "every 3 years" in body)
+    check("calendar states the plan review cadence as information",
+          "every 5 years" in body or "every five years" in body)
+    check("calendar states the Ontario posting rules as an "
+          "ongoing duty in force since January 1, 2026",
+          "January 1, 2026" in body and "Ongoing duty" in body
+          and "45 days" in body and "3 years" in body)
+    check("calendar states the Loi25 ongoing duties incl. the "
+          "privacy officer",
+          "privacy officer" in body and "30-day" in body)
+    check("calendar states both ADA Title II deadlines under "
+          "the current DOJ rule",
+          "April 26, 2027" in body and "April 26, 2028" in body
+          and "current DOJ rule" in body)
+    check("calendar monitoring note describes only the real "
+          "re-scan comparison (no invented scheduler)",
+          "no scheduler" in body
+          and "verified resolved by re-scan" in body)
+    check("calendar bundle section lists the existing monitoring "
+          "prices",
+          "$39/month" in body and "$49/month" in body)
+    check("calendar carries no Stripe link at all (no new or "
+          "bundle price invented)",
+          "buy.stripe.com" not in body)
+    check("calendar bundle section ends with the founding-list "
+          "signup",
+          'action="/founding"' in body
+          and "Join the founding list" in body)
+    check("seo: /calendar canonical is /calendar on the "
+          "production domain",
+          '<link rel="canonical" href="https://getnorthcheck.ca'
+          '/calendar">' in body)
+
+
+def app_binder_checks():
+    print("App — Evidence Binder")
+    # Fixture scans for one site across two modules, so the binder
+    # has something real to assemble.
+    post("/loi25", {"url": FIX + "/good/"})
+    post("/trackers", {"url": FIX + "/good/"})
+    s, body = get("/")
+    check("landing links the evidence binder with no payment "
+          "link (Stripe count unchanged at 4)",
+          'href="/binder"' in body
+          and body.count("buy.stripe.com") == 4,
+          f"count {body.count('buy.stripe.com')}")
+    s, body = get("/binder")
+    check("/binder 200 with form",
+          s == 200 and 'name="org_name"' in body
+          and 'name="website"' in body)
+    check("/binder form states certification stays on the "
+          "Ontario portal",
+          "Ontario government portal" in body)
+
+    s, body = post("/binder", {"org_name": "Binder Fixture Inc.",
+                                "website": FIX + "/never-scanned/"})
+    check("binder for a site with no scans says so honestly "
+          "(400, no empty binder)",
+          s == 400 and "No scans on file" in body, f"status {s}")
+
+    s, body = post("/binder", {"org_name": "Binder Fixture Inc.",
+                                "website": FIX + "/good/"})
+    check("binder assembles and lands on the cover view",
+          s == 200 and "Binder Fixture Inc." in body
+          and "what this binder contains" in body, f"status {s}")
+    rec = last_binder_record()
+    bid = rec["id"]
+    check("binder record lists included and missing modules "
+          "correctly",
+          set(rec.get("included", [])) >= {"loi25", "trackers"}
+          and "ada" in rec.get("missing", [])
+          and "emailauth" in rec.get("missing", [])
+          and rec.get("signoff") is None)
+    check("binder cover names a missing module as no scan on "
+          "file (never silently omitted)",
+          "ADA Title II Check" in body and "No scan on file" in body)
+
+    s, body = post("/binder/signoff", {
+        "binder_id": bid,
+        "officer_name": "Jordan Lee",
+        "officer_title": "President",
+        "signoff_date": "2026-11-13",
+    })
+    check("sign-off without the statement checkbox is rejected "
+          "(400)", s == 400)
+    rec = last_binder_record()
+    check("rejected sign-off was not stored",
+          rec.get("signoff") is None)
+
+    s, body = post("/binder/signoff", {
+        "binder_id": bid,
+        "officer_name": "Jordan Lee",
+        "officer_title": "President",
+        "signoff_date": "2026-11-13",
+        "statement_confirmed": "yes",
+    })
+    check("sign-off POST persists and appears on the cover",
+          s == 200 and "Jordan Lee" in body
+          and "I have reviewed this evidence" in body,
+          f"status {s}")
+    rec = last_binder_record()
+    check("sign-off stored with the binder record, owner-stated",
+          rec.get("signoff", {}).get("officer_name") == "Jordan Lee"
+          and rec["signoff"]["date"] == "2026-11-13")
+
+    s, body = get(f"/binder/pack/{bid}")
+    check("binder pack 200: cover, sign-off, module sections and "
+          "DRAFT stamp in one document",
+          s == 200 and "DRAFT" in body
+          and "Jordan Lee" in body
+          and "I have reviewed this evidence" in body
+          and "Loi25 Kit" in body
+          and "Tracker and Consent Check" in body
+          and "No scan on file" in body
+          and "does not certify compliance" in body)
+    s, body = post("/binder", {"org_name": "No Scheme Co",
+                                "website": "example.com"})
+    check("binder rejects a website without scheme (400)",
+          s == 400)
+
+
 def _meta_description(body):
     import re as _re
     m = _re.search(r'<meta name="description" content="([^"]*)"',
@@ -1209,7 +1472,8 @@ def app_seo_checks():
     s, sm = get("/sitemap.xml")
     expected = ["/", "/aoda-compliance-report", "/scan", "/filing",
                 "/loi25", "/francais", "/emailauth", "/trackers",
-                "/ada", "/postcheck", "/vault"]
+                "/ada", "/register", "/calendar", "/binder",
+                "/postcheck", "/vault"]
     check("seo: sitemap 200 listing exactly the public pages",
           s == 200
           and all(f"<loc>https://getnorthcheck.ca{p}</loc>" in sm
@@ -1273,6 +1537,9 @@ def main():
         app_emailauth_checks()
         app_trackers_checks()
         app_ada_checks()
+        app_register_checks()
+        app_calendar_checks()
+        app_binder_checks()
         app_seo_checks()
     finally:
         app.terminate()
