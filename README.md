@@ -29,10 +29,13 @@ This build uses **free / open-source tools only**:
 | Storage | JSON files under `data/` (created at runtime) | Free |
 | Process | `bash run.sh` | Free |
 
-The **only** future paid-adjacent piece is **payment processing** (a
-processor such as Stripe) when charging starts — it is explicitly
-**not** included in this build. No payments are collected anywhere in
-this app.
+Card data is not collected in this app. Checkout is a Stripe Payment
+Link that opens in the buyer's browser. Checkout is open for the AODA
+evidence pack (**$149 CAD**), AODA monitoring (**$39 CAD/month**), the
+Complete Filing Pack (**$249 CAD**), and PostCheck ON (**$49
+CAD/month**). The Loi25 Kit check is live; its paid plan (**$39
+CAD/month** per site) has no payment link and stays on the founding
+list.
 
 ## Run it
 
@@ -49,12 +52,14 @@ deployment platform requires it — see `DEPLOY.md`.
 - **Landing page (`/`)** — the Ontario AODA filing deadline
   (**December 31, 2026** for employers with 20+ staff; 50+ must also
   certify WCAG 2.0 Level AA websites) front and centre; all five
-  modules shown live; founding prices (AODA evidence pack **$149**,
-  monitoring **$39/month**; Complete the Filing Pack **$249**
-  founding; PostCheck **$49/month**; Loi25 Kit
-  **$39/month** per site; Français Check included with a scan or
-  monitoring plan; Email Authentication Check a free check, no
-  standalone price set); and a founding-list email capture (email +
+  modules shown live, because each checker route works; founding
+  prices in **CAD** (AODA evidence pack **$149 CAD**, monitoring
+  **$39 CAD/month**, Complete the Filing Pack **$249 CAD**, PostCheck
+  **$49 CAD/month** — checkout open for these four; Loi25 Kit **$39
+  CAD/month** per site, check live, paid plan on the founding list;
+  Français Check included with a scan or monitoring plan; Email
+  Authentication Check a free check, no standalone price set); and a
+  founding-list email capture for the Loi25 paid plan only (email +
   timestamp stored to `data/founding.json`; **no email is sent**).
 - **AODA scan (`/scan`)** — enter an http/https URL; the crawler
   follows same-domain links breadth-first up to **10 pages**, skips
@@ -90,15 +95,16 @@ deployment platform requires it — see `DEPLOY.md`.
   accessibility statement generated only from the recorded scan and
   checklist, with bracketed placeholders for anything only the
   organization can supply (e.g. the feedback contact). Presented on
-  the landing page at a **$249 founding price** (a hypothesis, not a
-  validated price); interest routes to the free scan and the founding
-  list — no payment links.
+  the landing page at a **$249 CAD founding price** (a hypothesis, not
+  a validated price). Checkout for that pack is open. The scan and
+  the checklist stay available without paying.
 - **PostCheck (`/postcheck`)** — title, employer, date posted, and the
   pasted posting text are checked against Ontario's Jan 1, 2026 rules
   (O. Reg. 476/24): compensation presence, the $50,000 range-width cap
   with the over-$200,000 exemption, AI screening disclosure, vacancy
   statement, and the prohibited Canadian-experience requirement. The
   results show findings plus the engine's corrected-draft suggestions.
+  Checkout for the module is open at **$49 CAD/month**.
 - **Loi25 Kit (`/loi25`)** — enter a URL; the same crawler fetches up
   to 10 same-domain pages, then the engine checks what a public
   website can honestly show for Quebec's Law 25: a privacy policy
@@ -109,9 +115,9 @@ deployment platform requires it — see `DEPLOY.md`.
   reachable from the policy page (`LOI25-POLICY-FRENCH`; an info
   finding records when the policy page itself fell outside the
   crawl). Results and a downloadable HTML evidence pack reuse the
-  AODA scan's pages, pack format, and DRAFT / honesty stamp. No
-  payment links yet — interest routes to the check itself and the
-  founding list.
+  AODA scan's pages, pack format, and DRAFT / honesty stamp. The
+  check is live. The paid plan (**$39 CAD/month** per site) has no
+  payment link; that offer stays on the founding list.
 - **Français Check (`/francais`)** — enter a URL; after the crawl,
   the app tries the conventional French counterparts (`/fr/…`) of
   the home, contact, and privacy pages. The engine checks for a
@@ -121,11 +127,15 @@ deployment platform requires it — see `DEPLOY.md`.
   French (`FR-*-LANG`). Existence and reachability only — translation
   quality is never assessed. Results list every French address tried;
   the evidence pack matches the other modules.
-- **Vault (`/vault`)** — "Save to vault" stores a checked posting in
-  `data/vault.json` with its clocks computed by the engine:
-  **notify-by = date posted + 45 days** and **retention-until = date
-  posted + 3 years**. The vault page lists every saved posting with
-  days remaining until notify-by (overdue dates flagged).
+- **Vault (`/vault`) — PAUSED (2026-11-13 fix pass)** — the vault had
+  no per-customer access, so every saved posting was world-readable.
+  `GET /vault` and `POST /vault/save` now return the branded 404,
+  the PostCheck results page offers no save button, and `/vault` is
+  out of the nav and the sitemap. Existing `data/vault.json` content
+  is left untouched. The PostCheck clocks (notify-by = date posted
+  + 45 days, retention-until = date posted + 3 years) are still
+  computed on every results page. Re-enable only with per-customer
+  access.
 - **Email Authentication Check (`/emailauth`)** — enter a domain;
   the engine checks its public email authentication DNS records and
   builds the same dated evidence pack. **SPF** (TXT at the domain):
@@ -254,6 +264,7 @@ folder.)
 ## Gating note
 
 Jeremy stated on 2026-11-07 that the Scotiabank policies are cleared,
-so selling is unblocked. This build still includes **no payment
-collection** — charging starts only when a payment processor is added
-deliberately (see `DEPLOY.md`).
+so selling is unblocked. Checkout is the Stripe Payment Links in
+`app.py` for the AODA evidence pack, AODA monitoring, the Complete
+Filing Pack, and PostCheck ON. The app stores no card data. The
+Loi25 paid plan remains founding-list only.
