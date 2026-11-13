@@ -38,6 +38,22 @@ Canadian SMB compliance platform, Phase 1 modules:
     Title II rule. The April 26, 2027 / April 26, 2028 deadlines are
     stated as "under the current DOJ rule". Free check; no price is
     set for this module.
+  * Privacy Register — not a scan: the organization records its own
+    privacy incidents and access / correction requests through
+    forms, stored in the same JSON-store pattern as the checklist.
+    Entries are owner-stated, never verified, and labelled as such
+    on every surface including the dated register pack.
+  * Compliance Calendar — a public page rendering the engine's one
+    deadline table (nc.COMPLIANCE_CALENDAR): dated deadlines, review
+    cadences and ongoing duties kept distinct, plus the existing
+    monitoring offers shown together at their existing prices. No
+    bundle price exists and none is shown.
+  * Evidence Binder — assembles one dated binder for a site from
+    its stored scans across modules (a module with no scan on file
+    is listed as such, never omitted), plus a senior-officer
+    sign-off record stored with the binder and printed in it. The
+    sign-off is owner-stated; certification happens on the Ontario
+    portal, not here.
 
 Stack: Python standard library only — http.server, server-rendered
 HTML with inline CSS, no JavaScript frameworks, no external requests.
@@ -71,6 +87,8 @@ FOUNDING_PATH = os.path.join(DATA_DIR, "founding.json")
 SCANS_PATH = os.path.join(DATA_DIR, "scans.json")
 VAULT_PATH = os.path.join(DATA_DIR, "vault.json")
 CHECKLISTS_PATH = os.path.join(DATA_DIR, "checklists.json")
+REGISTERS_PATH = os.path.join(DATA_DIR, "registers.json")
+BINDERS_PATH = os.path.join(DATA_DIR, "binders.json")
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8790"))
@@ -293,6 +311,39 @@ PAGE_SEO = {
             "to review on your public website, page by page, with "
             "a dated evidence pack. Evidence, not certification.",
     },
+    "Privacy Register": {
+        "path": "/register",
+        "description":
+            "Keep your privacy register: log confidentiality "
+            "incidents and access or correction requests, with "
+            "the 30-day response window shown, as a dated pack.",
+    },
+    "Privacy Register — your entries": {
+        "description":
+            "Your privacy register entries: incidents and access "
+            "or correction requests you recorded, labelled owner "
+            "stated, with a dated register pack to download.",
+    },
+    "Compliance Calendar": {
+        "path": "/calendar",
+        "description":
+            "Every NorthCheck deadline in one place: the December "
+            "31, 2026 AODA report, Ontario posting duties, Law 25, "
+            "and the ADA Title II dates in 2027 and 2028.",
+    },
+    "Evidence Binder": {
+        "path": "/binder",
+        "description":
+            "One dated evidence binder for your site: every "
+            "NorthCheck scan on file, what is missing, and a "
+            "senior officer sign-off record, in a single pack.",
+    },
+    "Evidence Binder — cover": {
+        "description":
+            "Your evidence binder cover: which module scans are "
+            "included, which have no scan on file, and the senior "
+            "officer sign-off record for this binder.",
+    },
     "PostCheck results": {
         "description":
             "Your PostCheck results: how the posting reads against "
@@ -312,7 +363,8 @@ PAGE_SEO = {
 # record ids.
 SITEMAP_PATHS = ["/", "/aoda-compliance-report", "/scan", "/filing",
                  "/loi25", "/francais", "/emailauth", "/trackers",
-                 "/ada", "/postcheck", "/vault"]
+                 "/ada", "/register", "/calendar", "/binder",
+                 "/postcheck", "/vault"]
 
 
 def sitemap_xml():
@@ -440,6 +492,9 @@ def page(title, body, extra_head=""):
     <a href="/emailauth">Email check</a>
     <a href="/trackers">Tracker check</a>
     <a href="/ada">ADA (US)</a>
+    <a href="/register">Register</a>
+    <a href="/calendar">Calendar</a>
+    <a href="/binder">Binder</a>
     <a href="/vault">Vault</a>
   </nav>
 </header>
@@ -528,8 +583,12 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   cookie consent mechanism visible in the served HTML, and a French
   version of the privacy policy — then builds the same dated
   evidence pack as AODA FileReady. Law 25 duties that leave no trace
-  on a website (an incident register, privacy impact assessments)
-  are out of scope and are never implied.</p>
+  on a website (privacy impact assessments, internal governance)
+  are out of scope for this scan and are never implied by it. The
+  incident register is one of those invisible duties, so NorthCheck
+  offers it separately: the <a href="/register">Privacy Register</a>
+  tool below is where you record incidents and requests yourself.
+  This scan neither checks nor implies anything about a register.</p>
   <p><strong>Founding price: $39/month</strong> per site.</p>
   <a class="btn" href="/loi25">Run the Loi25 check</a>
   <a class="btn" href="/#founding">Join the founding list</a>
@@ -604,6 +663,47 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   results, not skipped over.</p>
   <p><strong>Free check</strong> · new US module.</p>
   <a class="btn" href="/ada">Run the ADA Title II check</a>
+</div>
+
+<div class="card">
+  <h2>Privacy Register <span class="badge">Module 8 — live</span></h2>
+  <p>Quebec's Law 25 (and PIPEDA, for federally regulated work)
+  expects an organization to keep a register of confidentiality
+  incidents — and no website scan can see whether you keep one.
+  This tool is the register itself, not a check of it: you record
+  each privacy incident (what happened, when you discovered it,
+  who was affected, what you did, who was notified) and each
+  access or correction request from an individual, with the
+  30-day response window shown beside every request. Entries are
+  your own records, stored as given and never verified by
+  NorthCheck, and you can download the whole register as one
+  dated pack.</p>
+  <p><strong>Free tool</strong> · included with every plan.</p>
+  <a class="btn" href="/register">Open the Privacy Register</a>
+</div>
+
+<div class="card">
+  <h2>Compliance Calendar</h2>
+  <p>Every date NorthCheck covers, on one page: the December 31,
+  2026 AODA report (and the 3-year cycle after it), the Ontario
+  posting duties in force since January 1, 2026, Law 25's ongoing
+  duties, and the ADA Title II dates in April 2027 and April 2028
+  under the current DOJ rule — with the monitoring offers shown
+  together at their regular prices.</p>
+  <a class="btn" href="/calendar">See the compliance calendar</a>
+</div>
+
+<div class="card">
+  <h2>Evidence Binder + senior-officer sign-off</h2>
+  <p>When the pieces are done, a senior officer needs one folder,
+  not seven downloads. The binder assembles every NorthCheck scan
+  on file for your site — AODA, Loi25, Français, email, trackers,
+  ADA, and your filing checklist where one exists — into a single
+  dated pack. Modules with no scan on file are listed as missing,
+  never quietly dropped, and a sign-off record (officer name,
+  title, date, and the review statement) is stored with the
+  binder and printed in it.</p>
+  <a class="btn" href="/binder">Assemble an evidence binder</a>
 </div>
 
 <div class="card" id="founding">
@@ -1774,6 +1874,714 @@ def trackers_pack_html(record):
 
 
 # ---------------------------------------------------------------------------
+# Privacy Register — owner-recorded incidents and requests
+# ---------------------------------------------------------------------------
+# Deliberately NOT a scan. The Loi25 check can only report what a
+# public website shows, and a privacy register leaves no trace on a
+# website — so the register is its own tool: the organization
+# records its incidents and its access / correction requests
+# through these forms, and NorthCheck stores them in the same
+# JSON-store pattern as the filing checklist (data/registers.json,
+# on the app disk, same persistence caveat as every other store).
+# Entries are owner-stated: never verified, labelled as such on the
+# page and in the pack, under the engine's REGISTER_STAMP.
+
+REGISTER_OWNER_LINE = ("Entries below are the organization's own "
+                       "records, entered by the owner and stored as "
+                       "given. NorthCheck has not verified them.")
+
+
+def load_registers():
+    return load_list(REGISTERS_PATH)
+
+
+def find_register(register_id):
+    return next((r for r in load_registers()
+                 if r.get("id") == register_id), None)
+
+
+def _save_register(record):
+    entries = load_registers()
+    for i, existing in enumerate(entries):
+        if existing.get("id") == record["id"]:
+            entries[i] = record
+            break
+    else:
+        entries.append(record)
+    _save(REGISTERS_PATH, entries)
+
+
+def _valid_iso_date(value):
+    try:
+        datetime.date.fromisoformat((value or "").strip())
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
+def _select_html(name, choices, current=""):
+    options = []
+    for choice in choices:
+        selected = " selected" if choice == current else ""
+        options.append(f'<option value="{escape(choice, quote=True)}"'
+                       f'{selected}>{escape(choice)}</option>')
+    return (f'<select id="{name}" name="{name}">'
+            + "".join(options) + "</select>")
+
+
+def register_page(error=None):
+    err = f'<div class="notice">{escape(error)}</div>' if error else ""
+    existing = load_registers()
+    if existing:
+        items = "".join(
+            f'<li><a href="/register/view/{r["id"]}">'
+            f'{escape(r["org_name"])}</a> — {escape(r["website"])} · '
+            f'{len(r.get("incidents", []))} incident(s), '
+            f'{len(r.get("requests", []))} request(s)</li>'
+            for r in existing)
+        existing_html = f"""
+<div class="card">
+  <h2>Registers on file</h2>
+  <ul>{items}</ul>
+</div>"""
+    else:
+        existing_html = ""
+    body = f"""
+<h1>Privacy Register — incidents and requests you record</h1>
+<p>Quebec's Law 25 expects an organization to keep a register of
+confidentiality incidents involving personal information, and both
+Law 25 and PIPEDA give individuals the right to ask for access to —
+or correction of — their personal information, with a response
+generally due within 30 days. None of that is visible on a website,
+so no scan can check it. This tool keeps the register itself.</p>
+<div class="deadline">
+  <strong>These entries are your organization's own records.</strong>
+  You enter them, NorthCheck stores them as given and does not
+  verify them. They are labelled "owner stated" everywhere,
+  including in the register pack. Keeping this register is record
+  keeping, not legal advice — whether an incident had to be
+  reported, or a request answered a particular way, is a call for
+  the organization and its own advisors.
+</div>
+{err}
+<div class="card">
+  <h2>Start a register</h2>
+  <form method="post" action="/register">
+    <label for="org_name">Organization name</label>
+    <input type="text" id="org_name" name="org_name" required
+           placeholder="Maple Street Bakery Inc.">
+    <label for="website">Website</label>
+    <input type="url" id="website" name="website" required
+           placeholder="https://yourbusiness.ca">
+    <button type="submit">Start the register</button>
+  </form>
+</div>
+{existing_html}
+<p class="small">{escape(nc.REGISTER_STAMP)}</p>
+"""
+    return page("Privacy Register", body)
+
+
+def _incidents_table_html(record):
+    incidents = record.get("incidents", [])
+    if not incidents:
+        return "<p>No incidents recorded yet.</p>"
+    rows = []
+    for e in incidents:
+        regulator = escape(e.get("regulator_notified", ""))
+        if e.get("regulator_date"):
+            regulator += f" ({escape(e['regulator_date'])})"
+        individuals = escape(e.get("individuals_notified", ""))
+        if e.get("individuals_date"):
+            individuals += f" ({escape(e['individuals_date'])})"
+        rows.append(f"""
+<tr>
+  <td>{escape(e.get('date_discovered', ''))}</td>
+  <td>{escape(e.get('type', ''))}</td>
+  <td>{escape(e.get('description', ''))}<br>
+      <span class="small">Affected: {escape(e.get('affected', '') or '—')}<br>
+      Containment: {escape(e.get('containment', '') or '—')}</span></td>
+  <td>{regulator}</td>
+  <td>{individuals}</td>
+</tr>""")
+    return f"""
+<table>
+  <tr><th>Date discovered</th><th>Type</th>
+      <th>Description (owner stated)</th><th>Regulator notified</th>
+      <th>Affected individuals notified</th></tr>
+  {''.join(rows)}
+</table>"""
+
+
+def _requests_table_html(record):
+    requests = record.get("requests", [])
+    if not requests:
+        return "<p>No requests recorded yet.</p>"
+    rows = []
+    for e in requests:
+        due = nc.register_request_due_date(e.get("date_received", ""))
+        rows.append(f"""
+<tr>
+  <td>{escape(e.get('date_received', ''))}</td>
+  <td>{escape(e.get('requester_type', ''))}</td>
+  <td>{escape(e.get('request_type', ''))}</td>
+  <td>{escape(due or '—')}</td>
+  <td>{escape(e.get('status', ''))}</td>
+  <td>{escape(e.get('date_completed', '') or '—')}</td>
+</tr>""")
+    return f"""
+<table>
+  <tr><th>Date received</th><th>Requester</th><th>Request</th>
+      <th>Response window ends (received + {nc.REGISTER_RESPONSE_DAYS}
+      days)</th><th>Status</th><th>Date completed</th></tr>
+  {''.join(rows)}
+</table>
+<p class="small">The response-window date is general information
+only: Law 25 and PIPEDA work with a {nc.REGISTER_RESPONSE_DAYS}-day
+window for access and correction requests, with extensions in
+defined cases. The exact duty for a given request is the
+organization's call — this is not legal advice.</p>"""
+
+
+def register_view_page(record, error=None):
+    err = f'<div class="notice">{escape(error)}</div>' if error else ""
+    today = datetime.date.today().isoformat()
+    body = f"""
+<h1>Privacy Register — {escape(record['org_name'])}</h1>
+<p>Website: <strong>{escape(record['website'])}</strong><br>
+Register started: {escape(record['timestamp'])} ·
+{len(record.get('incidents', []))} incident(s) ·
+{len(record.get('requests', []))} request(s) recorded</p>
+<p><a class="btn" href="/register/pack/{record['id']}">Download the register pack (HTML)</a></p>
+{err}
+<div class="card">
+  <h2>Confidentiality incidents (owner stated)</h2>
+  <p class="small">{REGISTER_OWNER_LINE}</p>
+  {_incidents_table_html(record)}
+</div>
+
+<div class="card">
+  <h2>Log an incident</h2>
+  <form method="post" action="/register/incident">
+    <input type="hidden" name="register_id" value="{record['id']}">
+    <label for="date_discovered">Date discovered</label>
+    <input type="date" id="date_discovered" name="date_discovered"
+           required value="{today}">
+    <label for="incident_type">Type of incident</label>
+    {_select_html("incident_type", nc.REGISTER_INCIDENT_TYPES)}
+    <label for="description">What happened</label>
+    <input type="text" id="description" name="description" required
+           placeholder="Describe the incident in your own words">
+    <label for="affected">Records / people affected</label>
+    <input type="text" id="affected" name="affected"
+           placeholder="For example: about 40 customer records">
+    <label for="containment">Containment — what was done</label>
+    <input type="text" id="containment" name="containment"
+           placeholder="For example: access revoked, passwords reset">
+    <label for="regulator_notified">Regulator notified</label>
+    {_select_html("regulator_notified", nc.REGISTER_NOTIFIED_CHOICES,
+                  "Not yet")}
+    <label for="regulator_date">Date the regulator was notified
+    (if applicable)</label>
+    <input type="date" id="regulator_date" name="regulator_date">
+    <label for="individuals_notified">Affected individuals
+    notified</label>
+    {_select_html("individuals_notified",
+                  nc.REGISTER_NOTIFIED_CHOICES, "Not yet")}
+    <label for="individuals_date">Date individuals were notified
+    (if applicable)</label>
+    <input type="date" id="individuals_date" name="individuals_date">
+    <button type="submit">Add the incident</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Access / correction requests (owner stated)</h2>
+  <p class="small">{REGISTER_OWNER_LINE}</p>
+  {_requests_table_html(record)}
+</div>
+
+<div class="card">
+  <h2>Log a request</h2>
+  <form method="post" action="/register/request">
+    <input type="hidden" name="register_id" value="{record['id']}">
+    <label for="date_received">Date received</label>
+    <input type="date" id="date_received" name="date_received"
+           required value="{today}">
+    <label for="requester_type">Who asked</label>
+    {_select_html("requester_type", nc.REGISTER_REQUESTER_TYPES)}
+    <label for="request_type">Type of request</label>
+    {_select_html("request_type", nc.REGISTER_REQUEST_TYPES)}
+    <label for="status">Status</label>
+    {_select_html("status", nc.REGISTER_REQUEST_STATUSES)}
+    <label for="date_completed">Date completed (if completed)</label>
+    <input type="date" id="date_completed" name="date_completed">
+    <button type="submit">Add the request</button>
+  </form>
+  <p class="small">The response window is
+  {nc.REGISTER_RESPONSE_DAYS} days from the date received, shown in
+  the table above as general information — not legal advice.</p>
+</div>
+
+<p class="small">{escape(nc.REGISTER_STAMP)}</p>
+<p class="small">{nc.DRAFT_STAMP}</p>
+"""
+    return page("Privacy Register — your entries", body)
+
+
+def register_pack_html(record):
+    date_line = datetime.date.today().isoformat()
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NorthCheck Privacy Register Pack — {escape(record['org_name'])}</title>
+<style>{CSS}</style>
+</head>
+<body>
+<main>
+<h1>NorthCheck Privacy Register Pack</h1>
+<p><strong>{escape(nc.DRAFT_STAMP, quote=False)}</strong></p>
+<ul>
+  <li><strong>Organization:</strong> {escape(record['org_name'])}</li>
+  <li><strong>Website:</strong> {escape(record['website'])}</li>
+  <li><strong>Register started:</strong> {escape(record['timestamp'])}</li>
+  <li><strong>Pack prepared:</strong> {escape(date_line)}</li>
+  <li><strong>Entries:</strong> {len(record.get('incidents', []))}
+  incident(s), {len(record.get('requests', []))} request(s)</li>
+</ul>
+
+<h2>Confidentiality incidents (owner stated)</h2>
+<p>{REGISTER_OWNER_LINE}</p>
+{_incidents_table_html(record)}
+
+<h2>Access / correction requests (owner stated)</h2>
+<p>{REGISTER_OWNER_LINE}</p>
+{_requests_table_html(record)}
+
+<h2>Honesty note</h2>
+<p>{escape(nc.REGISTER_STAMP)} NorthCheck stores what the owner
+records and does not verify entries, dates, or notification claims.
+Whether an incident had to be reported to a regulator or to
+affected individuals, and whether a request was answered as the
+law requires, are determinations for the organization and its own
+advisors.</p>
+<hr>
+<p class="small">Generated by NorthCheck. {HONESTY_LINE}</p>
+</main>
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
+# Compliance Calendar — the year-round deadline picture
+# ---------------------------------------------------------------------------
+# A public page rendered from the engine's single table
+# (nc.COMPLIANCE_CALENDAR) so the dates live in exactly one place.
+# The bundle section shows the EXISTING monitoring offers together
+# at their EXISTING prices, linked to their own module pages — no
+# bundle price or discount exists, and none is shown; the section
+# ends with the founding-list signup, like the homepage.
+
+def calendar_page(joined=False):
+    thanks = ('<div class="notice">Thanks — you are on the founding '
+              'list. We will write when your module opens.</div>'
+              if joined else "")
+    rows = []
+    for item in nc.COMPLIANCE_CALENDAR:
+        rows.append(f"""
+<tr>
+  <td><strong>{escape(item['area'])}</strong><br>
+      <a href="{escape(item['link'])}">{escape(item['link_label'])}</a></td>
+  <td>{escape(item['who'])}</td>
+  <td><strong>{escape(item['when'])}</strong><br>
+      <span class="small">{escape(item['kind'])}</span></td>
+  <td>{escape(item['detail'])}</td>
+</tr>""")
+    body = f"""
+<h1>Compliance calendar — the year-round picture</h1>
+<p>Canadian compliance is not one deadline. These are the dates,
+cadences and ongoing duties NorthCheck covers, in one place —
+dated deadlines are called deadlines, and ongoing duties are
+called ongoing duties.</p>
+
+<div class="card">
+  <table>
+    <tr><th>What</th><th>Who it applies to</th><th>When</th>
+        <th>What it involves</th></tr>
+    {''.join(rows)}
+  </table>
+</div>
+
+<div class="card">
+  <h2>Monitoring, honestly described</h2>
+  <p>There is no scheduler quietly re-scanning your site on its
+  own. What NorthCheck actually does today: every scan is stored,
+  and when a site is scanned again, the new scan is compared with
+  the previous one — findings that a re-scan no longer reports are
+  shown as <strong>verified resolved by re-scan</strong>, alongside
+  what is still open and what is new. That comparison is the
+  re-scan evidence the monitoring offers are built on, and it is
+  why the AODA filing pack can say "fixed" without taking anyone's
+  word for it.</p>
+</div>
+
+<div class="card">
+  <h2>One subscription picture</h2>
+  <p>The existing monitoring offers, together at their regular
+  founding prices. There is no separate bundle price — each offer
+  keeps its own price and its own terms.</p>
+  <table>
+    <tr><th>Offer</th><th>Price</th><th>Where</th></tr>
+    <tr>
+      <td>AODA monitoring — re-scan alerts on your website
+      evidence</td>
+      <td><strong>$39/month</strong></td>
+      <td><a href="/">See the AODA FileReady offer</a></td>
+    </tr>
+    <tr>
+      <td>PostCheck ON — Ontario job posting checks with the
+      45-day and 3-year clocks kept in the vault</td>
+      <td><strong>$49/month</strong> flat per company</td>
+      <td><a href="/postcheck">See PostCheck ON</a></td>
+    </tr>
+    <tr>
+      <td>Loi25 Kit — Quebec Law 25 website evidence, refreshed
+      as your site changes</td>
+      <td><strong>$39/month</strong> per site</td>
+      <td><a href="/loi25">See the Loi25 Kit</a></td>
+    </tr>
+  </table>
+  {thanks}
+  <form method="post" action="/founding">
+    <label for="email">Email address</label>
+    <input type="email" id="email" name="email" required
+           placeholder="you@yourbusiness.ca">
+    <button type="submit">Join the founding list</button>
+  </form>
+</div>
+
+<p class="small">{HONESTY_LINE} Dates that rest on a rule that can
+change are worded with the rule's current state — confirm the date
+that applies to your organization with your own advisors.</p>
+"""
+    return page("Compliance Calendar", body)
+
+
+# ---------------------------------------------------------------------------
+# Evidence Binder — one binder per site + senior-officer sign-off
+# ---------------------------------------------------------------------------
+# The binder does not scan anything. It assembles what is already
+# on file for a site — the latest stored scan from each module in
+# nc.BINDER_MODULES, plus the filing checklist where one exists —
+# under one cover, and says plainly which modules have no scan on
+# file. The sign-off record is the officer's own statement, stored
+# with the binder and printed in the pack, labelled owner-stated
+# everywhere. It is a record of review, not a certification:
+# certification of the AODA report happens on the Ontario portal.
+
+BINDER_OWNER_LINE = ("Sign-off details are the officer's own "
+                     "statement, recorded as given. NorthCheck "
+                     "has not verified them.")
+
+
+def load_binders():
+    return load_list(BINDERS_PATH)
+
+
+def find_binder(binder_id):
+    return next((b for b in load_binders()
+                 if b.get("id") == binder_id), None)
+
+
+def _save_binder(record):
+    entries = load_binders()
+    for i, existing in enumerate(entries):
+        if existing.get("id") == record["id"]:
+            entries[i] = record
+            break
+    else:
+        entries.append(record)
+    _save(BINDERS_PATH, entries)
+
+
+def latest_scan_for_site_module(key, module):
+    """Most recent stored scan of one module for a site key."""
+    for record in reversed(load_list(SCANS_PATH)):
+        if record.get("module") == module \
+                and site_key(record.get("start_url", "")) == key:
+            return record
+    return None
+
+
+def assemble_binder(org_name, website):
+    """Build a binder record from what is on file for the site.
+
+    Returns None when the site has no scans and no filing checklist
+    on file — an honest "nothing to bind yet", never an empty
+    binder.
+    """
+    key = site_key(website)
+    scan_ids = {}
+    included, missing = [], []
+    for module, _label in nc.BINDER_MODULES:
+        scan = latest_scan_for_site_module(key, module)
+        if scan is None:
+            missing.append(module)
+        else:
+            scan_ids[module] = scan["id"]
+            included.append(module)
+    checklist = latest_checklist_for_site(key)
+    if not scan_ids and checklist is None:
+        return None
+    return {
+        "id": uuid.uuid4().hex[:12],
+        "org_name": org_name,
+        "website": website,
+        "site_key": key,
+        "timestamp": datetime.datetime.now().isoformat(
+            timespec="seconds"),
+        "scan_ids": scan_ids,
+        "included": included,
+        "missing": missing,
+        "checklist_id": checklist["id"] if checklist else None,
+        "signoff": None,
+    }
+
+
+def _binder_scan_by_id(scan_id):
+    return next((s for s in load_list(SCANS_PATH)
+                 if s.get("id") == scan_id), None)
+
+
+def _binder_contents_rows(record):
+    """Cover contents: included modules with dates, missing named."""
+    rows = []
+    labels = dict(nc.BINDER_MODULES)
+    for module in record["included"]:
+        scan = _binder_scan_by_id(record["scan_ids"].get(module, ""))
+        when = scan["timestamp"] if scan else "record not found"
+        total = scan["total_findings"] if scan else 0
+        rows.append(f"""
+<tr>
+  <td>{escape(labels[module])}</td>
+  <td>Included — scanned {escape(str(when))} ·
+      {total} issue(s) to review</td>
+</tr>""")
+    for module in record["missing"]:
+        rows.append(f"""
+<tr>
+  <td>{escape(labels[module])}</td>
+  <td><strong>No scan on file</strong> for this site — run the
+      check to include it in a future binder.</td>
+</tr>""")
+    if record.get("checklist_id"):
+        rows.append("""
+<tr>
+  <td>AODA Complete the Filing — owner-answered checklist</td>
+  <td>Included (owner stated)</td>
+</tr>""")
+    else:
+        rows.append("""
+<tr>
+  <td>AODA Complete the Filing — owner-answered checklist</td>
+  <td><strong>No scan on file</strong> — no checklist on file for
+      this site.</td>
+</tr>""")
+    return "\n".join(rows)
+
+
+def _binder_signoff_html(record):
+    signoff = record.get("signoff")
+    if not signoff:
+        return ("<p>No sign-off recorded yet for this binder. The "
+                "officer's sign-off is recorded with the form "
+                "below and printed in the binder pack.</p>")
+    return f"""
+<p><strong>Signed off by:</strong> {escape(signoff['officer_name'])},
+{escape(signoff['title'])}<br>
+<strong>Date:</strong> {escape(signoff['date'])}<br>
+<strong>Statement:</strong> {escape(signoff['statement'])}</p>
+<p class="small">{BINDER_OWNER_LINE}</p>"""
+
+
+def binder_form_page(error=None, notice=None):
+    err = f'<div class="notice">{escape(error)}</div>' if error else ""
+    note = (f'<div class="notice">{escape(notice)}</div>'
+            if notice else "")
+    body = f"""
+<h1>Evidence Binder — one folder for the senior officer</h1>
+<p>Enter your organization and the website address you scanned.
+NorthCheck assembles one dated binder from every scan on file for
+that site — AODA, Loi25, Français, Email Authentication, Tracker
+and ADA — plus your AODA filing checklist where one exists.
+Modules with no scan on file are listed on the cover as
+<strong>no scan on file</strong>, never quietly dropped.</p>
+<div class="deadline">
+  <strong>The binder is evidence, not certification.</strong>
+  NorthCheck prepares it; a senior officer reviews it and records
+  their sign-off with the binder. The AODA accessibility compliance
+  report itself is filed and certified by your organization on the
+  Ontario government portal — not here.
+</div>
+{err}{note}
+<div class="card">
+  <form method="post" action="/binder">
+    <label for="org_name">Organization name</label>
+    <input type="text" id="org_name" name="org_name" required
+           placeholder="Maple Street Bakery Inc.">
+    <label for="website">Website (the address you scanned)</label>
+    <input type="url" id="website" name="website" required
+           placeholder="https://yourbusiness.ca">
+    <button type="submit">Assemble the binder</button>
+  </form>
+</div>
+<p class="small">{HONESTY_LINE}</p>
+"""
+    return page("Evidence Binder", body)
+
+
+def binder_view_page(record, error=None):
+    err = f'<div class="notice">{escape(error)}</div>' if error else ""
+    today = datetime.date.today().isoformat()
+    signoff_form = ""
+    if not record.get("signoff"):
+        signoff_form = f"""
+<div class="card">
+  <h2>Senior-officer sign-off</h2>
+  <p>Recorded with this binder and printed in the pack. The
+  sign-off is a record that the evidence was reviewed — it is not
+  a certification, and it does not file anything.</p>
+  <form method="post" action="/binder/signoff">
+    <input type="hidden" name="binder_id" value="{record['id']}">
+    <label for="officer_name">Officer name</label>
+    <input type="text" id="officer_name" name="officer_name" required
+           placeholder="Jordan Lee">
+    <label for="officer_title">Title</label>
+    <input type="text" id="officer_title" name="officer_title"
+           required placeholder="President">
+    <label for="signoff_date">Date</label>
+    <input type="date" id="signoff_date" name="signoff_date"
+           required value="{today}">
+    <label style="font-weight:400">
+      <input type="checkbox" name="statement_confirmed"
+             value="yes" required>
+      {escape(nc.BINDER_SIGNOFF_STATEMENT)}</label>
+    <button type="submit">Record the sign-off</button>
+  </form>
+</div>"""
+    body = f"""
+<h1>Evidence Binder — {escape(record['org_name'])}</h1>
+<p>Website: <strong>{escape(record['website'])}</strong><br>
+Binder generated: {escape(record['timestamp'])}</p>
+<p><a class="btn" href="/binder/pack/{record['id']}">Download the binder pack (HTML)</a></p>
+{err}
+<div class="card">
+  <h2>Cover — what this binder contains</h2>
+  <table>
+    <tr><th>Module</th><th>Status in this binder</th></tr>
+    {_binder_contents_rows(record)}
+  </table>
+</div>
+
+<div class="card">
+  <h2>Senior-officer sign-off (owner stated)</h2>
+  {_binder_signoff_html(record)}
+</div>
+{signoff_form}
+<p class="small">{nc.DRAFT_STAMP}</p>
+"""
+    return page("Evidence Binder — cover", body)
+
+
+def _binder_module_section(module, scan):
+    label = dict(nc.BINDER_MODULES)[module]
+    if scan is None:
+        return f"""
+<h2>{escape(label)}</h2>
+<p><strong>No scan on file</strong> for this site when this binder
+was generated. This section is intentionally empty — the module is
+listed so the gap is visible, not hidden.</p>"""
+    if module == "aoda":
+        return f"""
+<h2>{escape(label)}</h2>
+<p>Scanned: {escape(scan['timestamp'])} ·
+<strong>{scan['total_findings']} issues to review</strong></p>
+{_website_status_html(scan, detailed=True)}"""
+    return f"""
+<h2>{escape(label)}</h2>
+<p>Scanned: {escape(scan['timestamp'])} ·
+<strong>{scan['total_findings']} issues to review</strong></p>
+{findings_html(scan.get('findings', []))}"""
+
+
+def binder_pack_html(record):
+    sections = []
+    for module, _label in nc.BINDER_MODULES:
+        scan = None
+        if module in record.get("scan_ids", {}):
+            scan = _binder_scan_by_id(record["scan_ids"][module])
+        sections.append(_binder_module_section(module, scan))
+    checklist_section = ""
+    if record.get("checklist_id"):
+        checklist = find_checklist(record["checklist_id"])
+        if checklist is not None:
+            checklist_section = f"""
+<h2>AODA Complete the Filing — checklist answers (owner stated)</h2>
+<p>{OWNER_STATED_LINE}</p>
+{_checklist_answers_html(checklist['answers'])}"""
+    if not checklist_section:
+        checklist_section = """
+<h2>AODA Complete the Filing — checklist answers</h2>
+<p><strong>No scan on file</strong> — no filing checklist on file
+for this site. This section is intentionally empty.</p>"""
+    date_line = record["timestamp"][:10]
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NorthCheck Evidence Binder — {escape(record['org_name'])}</title>
+<style>{CSS}</style>
+</head>
+<body>
+<main>
+<h1>NorthCheck Evidence Binder</h1>
+<p><strong>{escape(nc.DRAFT_STAMP, quote=False)}</strong></p>
+
+<h2>Cover</h2>
+<ul>
+  <li><strong>Organization:</strong> {escape(record['org_name'])}</li>
+  <li><strong>Website:</strong> {escape(record['website'])}</li>
+  <li><strong>Binder generated:</strong> {escape(date_line)}</li>
+</ul>
+<table>
+  <tr><th>Module</th><th>Status in this binder</th></tr>
+  {_binder_contents_rows(record)}
+</table>
+
+<h2>Senior-officer sign-off (owner stated)</h2>
+{_binder_signoff_html(record)}
+
+{''.join(sections)}
+{checklist_section}
+
+<h2>Honesty note</h2>
+<p>Every finding in this binder is an issue to review, found by
+deterministic checks — not a determination that the site is
+compliant or non-compliant, and an empty findings list would not
+be a guarantee of compliance either. Checklist answers and the
+sign-off are the organization's own statements and have not been
+verified by NorthCheck. {escape(nc.FILING_CERTIFICATION_NOTE)}</p>
+<hr>
+<p class="small">Generated by NorthCheck. {HONESTY_LINE}</p>
+</main>
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
 # AODA Complete the Filing — checklist, Filing Pack, statement
 # ---------------------------------------------------------------------------
 
@@ -2402,6 +3210,47 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, ada_form_page())
         elif path == "/trackers":
             self._send(200, _site_form_page("trackers"))
+        elif path == "/register":
+            self._send(200, register_page())
+        elif path.startswith("/register/view/"):
+            record = find_register(path[len("/register/view/"):])
+            if record is None:
+                self._not_found()
+            else:
+                self._send(200, register_view_page(record))
+        elif path.startswith("/register/pack/"):
+            record = find_register(path[len("/register/pack/"):])
+            if record is None:
+                self._not_found()
+            else:
+                self._send(
+                    200, register_pack_html(record),
+                    extra_headers={
+                        "Content-Disposition":
+                            'attachment; filename="northcheck_privacy'
+                            f'_register_{record["id"]}.html"'})
+        elif path == "/calendar":
+            joined = query.get("joined", [""])[0] == "1"
+            self._send(200, calendar_page(joined=joined))
+        elif path == "/binder":
+            self._send(200, binder_form_page())
+        elif path.startswith("/binder/view/"):
+            record = find_binder(path[len("/binder/view/"):])
+            if record is None:
+                self._not_found()
+            else:
+                self._send(200, binder_view_page(record))
+        elif path.startswith("/binder/pack/"):
+            record = find_binder(path[len("/binder/pack/"):])
+            if record is None:
+                self._not_found()
+            else:
+                self._send(
+                    200, binder_pack_html(record),
+                    extra_headers={
+                        "Content-Disposition":
+                            'attachment; filename="northcheck_evidence'
+                            f'_binder_{record["id"]}.html"'})
         elif path == "/postcheck":
             self._send(200, postcheck_form_page())
         elif path == "/vault":
@@ -2439,7 +3288,172 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
         form = self._form()
-        if path == "/filing":
+        if path == "/register":
+            org_name = (form.get("org_name") or "").strip()
+            website = (form.get("website") or "").strip()
+            if not org_name or not website.startswith(
+                    ("http://", "https://")):
+                self._send(400, register_page(
+                    error="Enter the organization name and a full "
+                          "website URL starting with http:// or "
+                          "https://"))
+                return
+            record = {
+                "id": uuid.uuid4().hex[:12],
+                "org_name": org_name,
+                "website": website,
+                "site_key": site_key(website),
+                "incidents": [],
+                "requests": [],
+                "timestamp": datetime.datetime.now().isoformat(
+                    timespec="seconds"),
+            }
+            _save_register(record)
+            self._redirect(f"/register/view/{record['id']}")
+        elif path == "/register/incident":
+            record = find_register(
+                (form.get("register_id") or "").strip())
+            if record is None:
+                self._not_found()
+                return
+            date_discovered = (form.get("date_discovered")
+                               or "").strip()
+            description = (form.get("description") or "").strip()
+            incident_type = (form.get("incident_type") or "").strip()
+            regulator = (form.get("regulator_notified")
+                         or "Not yet").strip()
+            individuals = (form.get("individuals_notified")
+                           or "Not yet").strip()
+            regulator_date = (form.get("regulator_date")
+                              or "").strip()
+            individuals_date = (form.get("individuals_date")
+                                or "").strip()
+            if not _valid_iso_date(date_discovered) \
+                    or not description \
+                    or incident_type not in nc.REGISTER_INCIDENT_TYPES \
+                    or regulator not in nc.REGISTER_NOTIFIED_CHOICES \
+                    or individuals not in nc.REGISTER_NOTIFIED_CHOICES \
+                    or (regulator_date
+                        and not _valid_iso_date(regulator_date)) \
+                    or (individuals_date
+                        and not _valid_iso_date(individuals_date)):
+                self._send(400, register_view_page(
+                    record,
+                    error="The incident was not saved: it needs a "
+                          "valid date discovered, a type from the "
+                          "list, and a description in your own "
+                          "words. Notification dates, when given, "
+                          "must be real dates."))
+                return
+            record.setdefault("incidents", []).append({
+                "date_discovered": date_discovered,
+                "type": incident_type,
+                "description": description,
+                "affected": (form.get("affected") or "").strip(),
+                "containment": (form.get("containment") or "").strip(),
+                "regulator_notified": regulator,
+                "regulator_date": regulator_date,
+                "individuals_notified": individuals,
+                "individuals_date": individuals_date,
+                "recorded": datetime.datetime.now().isoformat(
+                    timespec="seconds"),
+            })
+            _save_register(record)
+            self._redirect(f"/register/view/{record['id']}")
+        elif path == "/register/request":
+            record = find_register(
+                (form.get("register_id") or "").strip())
+            if record is None:
+                self._not_found()
+                return
+            date_received = (form.get("date_received") or "").strip()
+            requester_type = (form.get("requester_type")
+                              or "").strip()
+            request_type = (form.get("request_type") or "").strip()
+            status = (form.get("status") or "").strip()
+            date_completed = (form.get("date_completed")
+                              or "").strip()
+            if not _valid_iso_date(date_received) \
+                    or requester_type not in \
+                    nc.REGISTER_REQUESTER_TYPES \
+                    or request_type not in nc.REGISTER_REQUEST_TYPES \
+                    or status not in nc.REGISTER_REQUEST_STATUSES \
+                    or (date_completed
+                        and not _valid_iso_date(date_completed)):
+                self._send(400, register_view_page(
+                    record,
+                    error="The request was not saved: it needs a "
+                          "valid date received and the requester, "
+                          "request type and status from the lists. "
+                          "A completion date, when given, must be "
+                          "a real date."))
+                return
+            record.setdefault("requests", []).append({
+                "date_received": date_received,
+                "requester_type": requester_type,
+                "request_type": request_type,
+                "due_date": nc.register_request_due_date(date_received),
+                "status": status,
+                "date_completed": date_completed,
+                "recorded": datetime.datetime.now().isoformat(
+                    timespec="seconds"),
+            })
+            _save_register(record)
+            self._redirect(f"/register/view/{record['id']}")
+        elif path == "/binder":
+            org_name = (form.get("org_name") or "").strip()
+            website = (form.get("website") or "").strip()
+            if not org_name or not website.startswith(
+                    ("http://", "https://")):
+                self._send(400, binder_form_page(
+                    error="Enter the organization name and a full "
+                          "website URL starting with http:// or "
+                          "https://"))
+                return
+            record = assemble_binder(org_name, website)
+            if record is None:
+                self._send(400, binder_form_page(
+                    error="No scans on file for that site yet, and "
+                          "no filing checklist either — there is "
+                          "nothing to bind. Run at least one check "
+                          "for the site first (the AODA scan, the "
+                          "Loi25 check, or any other module), then "
+                          "assemble the binder."))
+                return
+            _save_binder(record)
+            self._redirect(f"/binder/view/{record['id']}")
+        elif path == "/binder/signoff":
+            record = find_binder(
+                (form.get("binder_id") or "").strip())
+            if record is None:
+                self._not_found()
+                return
+            officer_name = (form.get("officer_name") or "").strip()
+            title = (form.get("officer_title") or "").strip()
+            signoff_date = (form.get("signoff_date") or "").strip()
+            confirmed = (form.get("statement_confirmed")
+                         or "").strip()
+            if not officer_name or not title \
+                    or not _valid_iso_date(signoff_date) \
+                    or confirmed != "yes":
+                self._send(400, binder_view_page(
+                    record,
+                    error="The sign-off was not recorded: it needs "
+                          "the officer's name and title, a valid "
+                          "date, and the review statement confirmed "
+                          "with the checkbox."))
+                return
+            record["signoff"] = {
+                "officer_name": officer_name,
+                "title": title,
+                "date": signoff_date,
+                "statement": nc.BINDER_SIGNOFF_STATEMENT,
+                "recorded": datetime.datetime.now().isoformat(
+                    timespec="seconds"),
+            }
+            _save_binder(record)
+            self._redirect(f"/binder/view/{record['id']}")
+        elif path == "/filing":
             org_name = (form.get("org_name") or "").strip()
             website = (form.get("website") or "").strip()
             if not org_name or not website.startswith(
