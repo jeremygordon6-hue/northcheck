@@ -40,6 +40,27 @@ driven by the app's crawler):
                 and PDF documents named as not checked. Deadline
                 dates are stated as "under the current DOJ rule"
                 (see ADA_DEADLINE_* below).
+  * register  : Privacy Register — NOT a scan. An owner-data tool:
+                the organization records its own privacy incidents
+                and access / correction requests through forms
+                (REGISTER_* below). Entries are owner-stated, stored
+                as given and never verified; the register pack says
+                exactly that. A website scan can neither see nor
+                imply anything about a register, which is why the
+                Loi25 module keeps it out of its findings.
+  * calendar  : Compliance Calendar — the year-round deadline table
+                (COMPLIANCE_CALENDAR) the app renders at /calendar.
+                One data table in code, so the dates stay
+                maintainable; ongoing duties are labelled as ongoing
+                duties, never dressed up as deadlines.
+  * binder    : Evidence Binder — the app assembles one dated
+                binder from a site's stored scans across modules
+                plus a senior-officer sign-off record
+                (BINDER_SIGNOFF_STATEMENT). A module with no scan on
+                file is listed as "no scan on file", never omitted;
+                the sign-off is the officer's own statement, stored
+                as given. Certification still happens on the Ontario
+                government portal — never here.
   * filing    : AODA Complete the Filing — re-scan comparison
                 (compare_scan_pages: a finding counts as resolved only
                 when a later scan no longer reports it), an
@@ -883,9 +904,13 @@ def _page_role(url):
 # contact published somewhere on the scanned pages, a cookie consent
 # mechanism visible in the HTML as served, and a French version of the
 # privacy policy being reachable from the policy page. Law 25 duties
-# that leave no trace on a public website (incident register, privacy
-# impact assessments, internal governance) are out of scope by design
-# and are never implied by these findings.
+# that leave no trace on a public website (privacy impact
+# assessments, internal governance) are out of scope by design
+# and are never implied by these findings. The incident register
+# is likewise invisible to a scan: NorthCheck offers it as a
+# separate owner-recorded tool (the Privacy Register — see
+# REGISTER_* below), and this scan neither checks nor implies
+# anything about whether a register exists or what it contains.
 
 def run_loi25_checks(pages):
     """Return (findings, stats) for a crawled site.
@@ -1196,6 +1221,195 @@ def run_francais_checks(pages, attempts):
 
 ADA_DEADLINE_LARGE = "April 26, 2027"   # population 50,000 or more
 ADA_DEADLINE_SMALL = "April 26, 2028"   # smaller / special districts
+
+
+# ---------------------------------------------------------------------------
+# Privacy Register — owner-recorded incidents and requests (not a scan)
+# ---------------------------------------------------------------------------
+# The register stores what the organization itself records: privacy
+# incidents it discovered, and access / correction requests it
+# received from individuals. NorthCheck does not verify a single
+# entry — the stamp below says so on every surface, and every entry
+# is labelled owner-stated wherever it appears.
+
+REGISTER_STAMP = (
+    "Register entries are the organization's own records, entered "
+    "by the owner and stored exactly as given. NorthCheck has not "
+    "verified any entry, and keeping this register does not by "
+    "itself satisfy any legal duty. NorthCheck prepares evidence; "
+    "it does not certify compliance and is not legal advice."
+)
+
+REGISTER_INCIDENT_TYPES = [
+    "Unauthorized access to personal information",
+    "Unauthorized disclosure / email sent to the wrong person",
+    "Lost or stolen device or paper records",
+    "Ransomware or malware",
+    "Employee snooping or misuse",
+    "Vendor or processor incident",
+    "Other confidentiality incident",
+]
+
+REGISTER_REQUESTER_TYPES = [
+    "Customer", "Employee", "Former employee", "Patient / client",
+    "Parent or guardian", "Other individual",
+]
+
+REGISTER_REQUEST_TYPES = [
+    "Access to their personal information",
+    "Correction of their personal information",
+    "Access and correction",
+    "Withdrawal of consent / deletion",
+    "Other request",
+]
+
+REGISTER_REQUEST_STATUSES = [
+    "Received — in progress",
+    "Completed",
+    "Refused (with reasons given)",
+    "Withdrawn by the requester",
+]
+
+REGISTER_NOTIFIED_CHOICES = ["Yes", "No", "Not yet", "Not applicable"]
+
+# Law 25 and PIPEDA both work with a 30-day response window for
+# access / correction requests (extensions exist in defined cases).
+# The register shows the window as general information only — the
+# exact duty for a given request is the organization's call, with
+# its own advice.
+REGISTER_RESPONSE_DAYS = 30
+
+
+def register_request_due_date(date_received):
+    """Response-window date: date_received + REGISTER_RESPONSE_DAYS.
+
+    date_received is an ISO date string (YYYY-MM-DD). Returns an ISO
+    date string, or None when the input is not a readable date.
+    """
+    try:
+        received = datetime.date.fromisoformat(
+            (date_received or "").strip())
+    except (ValueError, AttributeError):
+        return None
+    return (received + datetime.timedelta(
+        days=REGISTER_RESPONSE_DAYS)).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Compliance Calendar — one maintainable deadline table
+# ---------------------------------------------------------------------------
+# Every row is a fact the product already states somewhere on its
+# own pages; the calendar only gathers them. "when" distinguishes a
+# dated deadline from an ongoing duty — an ongoing duty is never
+# presented as a deadline, and a date that comes from a rule that
+# can change is worded with its care note.
+
+COMPLIANCE_CALENDAR = [
+    {
+        "area": "AODA accessibility compliance report",
+        "who": "Ontario businesses and non-profits with 20 or more "
+               "employees (50 or more must also certify their "
+               "websites meet WCAG 2.0 Level AA)",
+        "when": "December 31, 2026",
+        "kind": "Deadline",
+        "detail": "File the accessibility compliance report on the "
+                  "Ontario portal, certified by a senior officer. "
+                  "After this filing, reports are due every 3 "
+                  "years on the same cycle.",
+        "link": "/aoda-compliance-report",
+        "link_label": "What the report requires",
+    },
+    {
+        "area": "Accessibility plan review",
+        "who": "Ontario organizations with 50 or more employees",
+        "when": "At least once every 5 years",
+        "kind": "Review cadence — general information",
+        "detail": "The multi-year accessibility plan must be "
+                  "reviewed and updated at least once every five "
+                  "years, with a status report on progress each "
+                  "year. General information from the Integrated "
+                  "Accessibility Standards Regulation — confirm "
+                  "how it applies to your organization.",
+        "link": "/filing",
+        "link_label": "Complete the Filing",
+    },
+    {
+        "area": "Ontario job posting rules (PostCheck ON)",
+        "who": "Ontario employers with 25 or more employees, for "
+               "every publicly advertised job posting",
+        "when": "In force since January 1, 2026 — ongoing duty",
+        "kind": "Ongoing duty, not a deadline",
+        "detail": "Each posting carries its own clocks: notify "
+                  "interviewed applicants within 45 days of the "
+                  "posting date and keep the posting and its "
+                  "records for 3 years.",
+        "link": "/postcheck",
+        "link_label": "Check a job posting",
+    },
+    {
+        "area": "Quebec Law 25 duties (Loi25 Kit)",
+        "who": "Any business holding Quebecers' personal "
+               "information, including sellers outside Quebec",
+        "when": "In force — ongoing duties",
+        "kind": "Ongoing duty, not a deadline",
+        "detail": "Designate a privacy officer (the person in "
+                  "charge of personal information), publish your "
+                  "governance policies, keep a register of "
+                  "confidentiality incidents, and answer access "
+                  "and correction requests within the 30-day "
+                  "response window the register shows.",
+        "link": "/loi25",
+        "link_label": "Run the Loi25 check",
+    },
+    {
+        "area": "ADA Title II website rule (US)",
+        "who": "US public entities serving a population of "
+               "50,000 or more",
+        "when": ADA_DEADLINE_LARGE,
+        "kind": "Deadline — under the current DOJ rule",
+        "detail": "Websites and mobile apps must conform to WCAG "
+                  "2.1 Level AA by this date, under the US "
+                  "Department of Justice's current rule.",
+        "link": "/ada",
+        "link_label": "Run the ADA Title II check",
+    },
+    {
+        "area": "ADA Title II website rule (US)",
+        "who": "Smaller US public entities and special district "
+               "governments",
+        "when": ADA_DEADLINE_SMALL,
+        "kind": "Deadline — under the current DOJ rule",
+        "detail": "Websites and mobile apps must conform to WCAG "
+                  "2.1 Level AA by this date, under the US "
+                  "Department of Justice's current rule.",
+        "link": "/ada",
+        "link_label": "Run the ADA Title II check",
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# Evidence Binder — module order and the sign-off statement
+# ---------------------------------------------------------------------------
+# The binder assembles a site's stored scans in this order. A
+# module with no scan on file for the site is listed on the cover
+# as "no scan on file" — never silently omitted.
+
+BINDER_MODULES = [
+    ("aoda", "AODA FileReady — web accessibility (WCAG 2.0)"),
+    ("loi25", "Loi25 Kit — Quebec Law 25 website evidence"),
+    ("francais", "Français Check — French version reachability"),
+    ("emailauth", "Email Authentication Check — DMARC / SPF / DKIM"),
+    ("trackers", "Tracker and Consent Check — trackers and consent"),
+    ("ada", "ADA Title II Check — US public websites (WCAG 2.1)"),
+]
+
+BINDER_SIGNOFF_STATEMENT = (
+    "I have reviewed this evidence. I understand that NorthCheck "
+    "prepared it, that NorthCheck does not certify compliance, and "
+    "that certification of the AODA accessibility compliance "
+    "report happens on the Ontario government portal."
+)
 
 # The AODA rule ids carry into WCAG 2.1 unchanged; only the prefix
 # and the standard named in the category change.
