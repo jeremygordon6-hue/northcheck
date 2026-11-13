@@ -26,6 +26,20 @@ ports, then asserts:
     from a NORTHCHECK_DNS_FIXTURE JSON file — fully offline), and
     its evidence pack.
 
+  * Tracker and Consent Check: engine findings on fabricated pages
+    (trackers with no consent mechanism anywhere, trackers behind a
+    named consent platform with Consent Mode signals, and a clean
+    page with no trackers), the /trackers form and scan flow, and
+    its evidence pack. Fully offline — the fixtures are served by
+    the same local fixture server as the other site modules.
+  * ADA Title II Check: engine findings on two fabricated US city
+    sites (a problem city seeding the carried-over WCAG findings
+    plus the ADA-only checks — iframe title, zoom-blocking
+    viewport, input purpose, missing accessibility contact, an
+    unchecked PDF — and a clean city with an ADA coordinator page),
+    the /ada form and scan flow, its evidence pack, and the
+    deadline copy (April 26, 2027 / April 26, 2028, stated as under
+    the current DOJ rule, with no price or payment link).
   * SEO layer: per-page meta descriptions / Open Graph / canonical
     tags, homepage JSON-LD (Organization + FAQPage), /sitemap.xml and
     /robots.txt, and the /aoda-compliance-report deadline landing
@@ -188,6 +202,130 @@ MID_FR_HOME = """<!DOCTYPE html>
 </html>
 """
 
+# Tracker and Consent Check fixtures.
+# /tracked/ — Google Analytics (gtag) + Meta Pixel in the source and
+# no consent mechanism of any kind: no consent platform, no banner
+# markup, and the word cookie never appears.
+# -> TRACK-NO-CONSENT (high) + TRACK-NO-CONSENT-MODE (medium)
+TRACKED_HOME = """<!DOCTYPE html>
+<html lang="en">
+<head><title>Tracked Treasures</title>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-TRACKED123"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', 'G-TRACKED123');
+</script>
+<script src="https://connect.facebook.net/en_US/fbevents.js"></script>
+<script>fbq('init', '1234567890'); fbq('track', 'PageView');</script>
+</head>
+<body>
+<h1>Tracked Treasures</h1>
+<p>Handmade gifts and home goods, shipped anywhere in Canada.</p>
+</body>
+</html>
+"""
+
+# /consented/ — Google Tag Manager behind a Cookiebot script, with a
+# gtag consent default call carrying all four Consent Mode storage
+# settings. -> TRACK-CONSENT-UNVERIFIED (info), nothing else.
+CONSENTED_HOME = """<!DOCTYPE html>
+<html lang="en">
+<head><title>Consented Crafts</title>
+<script id="Cookiebot" src="https://consent.cookiebot.com/uc.js"
+        data-cbid="00000000-0000-0000-0000-000000000000"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('consent', 'default', {
+  'ad_storage': 'denied',
+  'analytics_storage': 'denied',
+  'ad_user_data': 'denied',
+  'ad_personalization': 'denied'
+});
+</script>
+<script src="https://www.googletagmanager.com/gtm.js?id=GTM-CONSENT1"></script>
+</head>
+<body>
+<h1>Consented Crafts</h1>
+<p>We ask before we track. Manage your cookie consent preferences
+or accept cookies to continue.</p>
+</body>
+</html>
+"""
+
+# ADA Title II fixtures: a fabricated US city site with seeded
+# problems, a clean services page on the same site, and a clean city
+# whose accessibility page names its ADA Coordinator.
+# USGOV_HOME seeds: no lang (ADA-LANG), empty title (ADA-TITLE),
+# h1 -> h3 skip (ADA-HEADING-ORDER), img without alt (ADA-IMG-ALT),
+# unlabelled email field with no autocomplete (ADA-LABEL +
+# ADA-INPUT-PURPOSE), iframe without title (ADA-IFRAME-TITLE),
+# user-scalable=no viewport (ADA-VIEWPORT), one PDF link
+# (ADA-PDF-UNCHECKED) and no accessibility contact anywhere
+# (ADA-STATEMENT) = 10 findings across the two pages.
+USGOV_HOME = """<!DOCTYPE html>
+<html>
+<head><title></title>
+<meta name="viewport" content="width=device-width, user-scalable=no">
+</head>
+<body>
+<h1>City of Example Falls</h1>
+<h3>News</h3>
+<img src="mayor.jpg">
+<iframe src="https://www.youtube.com/embed/council"></iframe>
+<form>
+<input type="email" id="nl-email" name="email">
+</form>
+<a href="/usgov/services">City services</a>
+<a href="/usgov/budget.pdf">2026 budget (PDF)</a>
+</body>
+</html>
+"""
+USGOV_SERVICES = """<!DOCTYPE html>
+<html lang="en">
+<head><title>City services — Example Falls</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<h1>City services</h1>
+<h2>Permits</h2>
+<img src="counter.jpg" alt="Residents at the permits counter">
+<form>
+<label for="appt-email">Email for your appointment reminder</label>
+<input type="email" id="appt-email" name="email" autocomplete="email">
+</form>
+<iframe src="https://maps.example.com/embed" title="Map of city offices"></iframe>
+<a href="/usgov/">Back to the home page</a>
+</body>
+</html>
+"""
+USCITY_HOME = """<!DOCTYPE html>
+<html lang="en">
+<head><title>City of Good Example</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<h1>City of Good Example</h1>
+<h2>Latest news</h2>
+<img src="hall.jpg" alt="Good Example city hall">
+<a href="/uscity/accessibility">Accessibility</a>
+</body>
+</html>
+"""
+USCITY_ACCESS = """<!DOCTYPE html>
+<html lang="en">
+<head><title>Accessibility — City of Good Example</title></head>
+<body>
+<h1>Accessibility</h1>
+<p>Our ADA Coordinator is Jordan Lee. Contact the ADA Coordinator
+to request an alternate format or to file an accessibility
+grievance.</p>
+</body>
+</html>
+"""
+
 # Complete the Filing fixtures: one page whose problems partly get
 # fixed between scans (v1 -> v2), used to prove the re-scan comparison.
 # v1: no lang, empty title, img without alt  -> LANG + TITLE + IMG-ALT
@@ -230,6 +368,12 @@ FIXTURES = {
     "/mid/": MID_HOME,
     "/mid/privacy": MID_PRIVACY,
     "/fr/mid/": MID_FR_HOME,
+    "/tracked/": TRACKED_HOME,
+    "/consented/": CONSENTED_HOME,
+    "/usgov/": USGOV_HOME,
+    "/usgov/services": USGOV_SERVICES,
+    "/uscity/": USCITY_HOME,
+    "/uscity/accessibility": USCITY_ACCESS,
     # deliberately absent (404): /fr/bad/*, /fr/mid/privacy
 }
 
@@ -585,6 +729,110 @@ def engine_emailauth_checks():
           == "example.com")
 
 
+def engine_trackers_checks():
+    print("Engine — Tracker and Consent Check (fixture pages)")
+    tracked = fixture_pages("/tracked/")
+    f, s = nc.run_trackers_checks(tracked)
+    by_rule = {x["rule_id"]: x["severity"] for x in f}
+    check("tracked site: no-consent high + no-consent-mode medium, "
+          "nothing else",
+          by_rule == {"TRACK-NO-CONSENT": "high",
+                      "TRACK-NO-CONSENT-MODE": "medium"}, str(by_rule))
+    check("tracked site: GA and Meta Pixel named, in signature order",
+          s["trackers_found"] == ["Google Analytics",
+                                  "Meta (Facebook) Pixel"],
+          str(s["trackers_found"]))
+    check("tracked site: no consent mechanism, Google tags flagged",
+          s["consent_mechanism_found"] is False
+          and s["google_tags_found"] is True
+          and s["consent_mode_found"] is False, str(s))
+    noconsent = next(x for x in f
+                     if x["rule_id"] == "TRACK-NO-CONSENT")
+    check("no-consent finding carries the honesty wording (does not "
+          "prove firing order)",
+          "does not prove the tags fire before consent"
+          in noconsent["explanation"])
+    check("tracker findings are stored under module trackers",
+          all(x["module"] == "trackers" for x in f))
+
+    consented = fixture_pages("/consented/")
+    f, s = nc.run_trackers_checks(consented)
+    by_rule = {x["rule_id"]: x["severity"] for x in f}
+    check("consented site: consent-unverified info only",
+          by_rule == {"TRACK-CONSENT-UNVERIFIED": "info"},
+          str(by_rule))
+    check("consented site: Cookiebot platform named, Consent Mode "
+          "found with the default call",
+          s["consent_platforms"] == ["Cookiebot"]
+          and s["consent_mode_found"] is True
+          and s["consent_mode_calls"] == ["default"], str(s))
+    unverified = f[0]
+    check("consent-unverified finding states presence is not proof "
+          "of blocking",
+          "does not prove the tags wait for consent"
+          in unverified["explanation"])
+
+    good = fixture_pages("/good/", "/good/privacy", "/good/contact")
+    f, s = nc.run_trackers_checks(good)
+    by_rule = {x["rule_id"]: x["severity"] for x in f}
+    check("good site: clean info result only (TRACK-NONE-FOUND)",
+          by_rule == {"TRACK-NONE-FOUND": "info"}, str(by_rule))
+    check("good site: tracker count 0 across the scanned pages",
+          s["tracker_count"] == 0 and s["pages_scanned"] == 3,
+          str(s["tracker_count"]))
+
+
+def engine_ada_checks():
+    print("Engine — ADA Title II Check (fixture pages)")
+    gov = fixture_pages("/usgov/", "/usgov/services")
+    f, s = nc.run_ada_checks(gov)
+    check("usgov site ADA findings == 10", len(f) == 10,
+          f"got {[(x['rule_id']) for x in f]}")
+    check("usgov ADA rules are the expected 10",
+          {x["rule_id"] for x in f} ==
+          {"ADA-LANG", "ADA-TITLE", "ADA-IMG-ALT", "ADA-LABEL",
+           "ADA-HEADING-ORDER", "ADA-IFRAME-TITLE", "ADA-VIEWPORT",
+           "ADA-INPUT-PURPOSE", "ADA-STATEMENT", "ADA-PDF-UNCHECKED"},
+          str({x["rule_id"] for x in f}))
+    by_rule = {x["rule_id"]: x["severity"] for x in f}
+    check("usgov ADA severity split: carried highs stay high, "
+          "ADA-only checks are medium/low/info",
+          by_rule["ADA-LANG"] == "high"
+          and by_rule["ADA-IMG-ALT"] == "high"
+          and by_rule["ADA-IFRAME-TITLE"] == "medium"
+          and by_rule["ADA-INPUT-PURPOSE"] == "medium"
+          and by_rule["ADA-STATEMENT"] == "low"
+          and by_rule["ADA-PDF-UNCHECKED"] == "info", str(by_rule))
+    check("ADA findings are stamped module ada and name WCAG 2.1, "
+          "never WCAG 2.0",
+          all(x["module"] == "ada" for x in f)
+          and all("WCAG 2.0" not in x["category"]
+                  and "WCAG 2.0" not in x["explanation"]
+                  for x in f))
+    check("ADA carried findings name the page in their evidence",
+          all(x["evidence"].startswith(FIX) for x in f
+              if x["rule_id"] not in ("ADA-STATEMENT",
+                                      "ADA-PDF-UNCHECKED")))
+    check("ADA stats: 2 pages scanned, 1 with findings, no "
+          "statement, 1 PDF linked",
+          s["pages_scanned"] == 2 and s["pages_with_findings"] == 1
+          and s["statement_found"] is False and s["pdf_links"] == 1,
+          str(s))
+    stmt = next(x for x in f if x["rule_id"] == "ADA-STATEMENT")
+    check("ADA-STATEMENT is an issue to review, not a determination",
+          "not a determination" in stmt["explanation"])
+    city = fixture_pages("/uscity/", "/uscity/accessibility")
+    f, s = nc.run_ada_checks(city)
+    check("uscity site ADA findings == 0 (statement found via its "
+          "accessibility page)", len(f) == 0 and s["statement_found"],
+          f"got {[(x['rule_id']) for x in f]}")
+    f, _ = nc.run_ada_checks(gov)
+    pack = nc.render_evidence_pack("ADA Title II Check",
+                                   [("Module", "ADA Title II")], f)
+    check("ADA pack carries DRAFT stamp + honesty note",
+          nc.DRAFT_STAMP in pack and "issue to review" in pack)
+
+
 def app_baseline_checks():
     print("App baseline (pre-existing pages and flows)")
     s, body = get("/")
@@ -811,6 +1059,102 @@ def app_emailauth_checks():
     check("emailauth rejects a non-domain (400)", s == 400)
 
 
+def app_trackers_checks():
+    print("App — Tracker and Consent Check")
+    s, body = get("/")
+    check("landing shows Tracker and Consent Check as Module 6 live",
+          "Tracker and Consent Check" in body
+          and "Module 6 — live" in body)
+    check("landing presents it as a free check linking /trackers",
+          "Free check" in body and 'href="/trackers"' in body)
+    check("landing carries no payment link for the tracker check",
+          body.count("buy.stripe.com") == 4,
+          f"count {body.count('buy.stripe.com')}")
+    s, body = get("/trackers")
+    check("/trackers 200 with form", s == 200 and 'name="url"' in body)
+    check("/trackers form states the served-HTML honesty limit",
+          "never a claim about when" in body and "tag fires" in body)
+
+    s, body = post("/trackers", {"url": FIX + "/tracked/"})
+    check("tracked scan: 2 issues in total",
+          s == 200 and "2 issues to review in total" in body,
+          f"status {s}")
+    check("tracked results name the trackers and signatures",
+          "Google Analytics" in body and "Meta (Facebook) Pixel"
+          in body and "connect.facebook.net" in body)
+    check("tracked results carry the module stamp",
+          "cannot show when a tag actually" in body)
+    rec = last_scan_record()
+    check("trackers scan stored as module trackers",
+          rec.get("module") == "trackers")
+    s, body = get(f"/pack/{rec['id']}")
+    check("trackers evidence pack 200 with DRAFT stamp and module "
+          "label",
+          s == 200 and "DRAFT" in body
+          and "Tracker and Consent Check" in body
+          and "does not certify compliance" in body)
+
+    s, body = post("/trackers", {"url": FIX + "/consented/"})
+    check("consented scan: 1 issue in total (info)",
+          s == 200 and "1 issues to review in total" in body,
+          f"status {s}")
+    check("consented results name the Cookiebot platform",
+          "Cookiebot" in body)
+    s, body = post("/trackers", {"url": FIX + "/good/"})
+    check("good scan: 1 issue in total (clean info result)",
+          s == 200 and "1 issues to review in total" in body,
+          f"status {s}")
+    s, body = post("/trackers", {"url": "example.com"})
+    check("trackers scan rejects a URL without scheme (400)",
+          s == 400)
+
+
+def app_ada_checks():
+    print("App — ADA Title II Check")
+    s, body = get("/")
+    check("landing shows ADA Title II Check as Module 7 live",
+          "ADA Title II Check" in body and "Module 7 — live" in body)
+    check("landing states both Title II deadlines under the "
+          "current DOJ rule",
+          "April 26, 2027" in body and "April 26, 2028" in body
+          and "current DOJ rule" in body)
+    check("landing presents ADA as a free check with no payment "
+          "link for it (Stripe link count unchanged at 4)",
+          'href="/ada"' in body and body.count("buy.stripe.com") == 4,
+          f"count {body.count('buy.stripe.com')}")
+    s, body = get("/ada")
+    check("/ada 200 with form", s == 200 and 'name="url"' in body)
+    check("/ada form states the deadlines with the current-rule "
+          "care wording",
+          "April 26, 2027" in body and "current DOJ rule" in body)
+    check("seo: /ada canonical is /ada on the production domain",
+          '<link rel="canonical" href="https://getnorthcheck.ca'
+          '/ada">' in body)
+
+    s, body = post("/ada", {"url": FIX + "/usgov/"})
+    check("ADA scan of usgov site: 10 issues in total",
+          s == 200 and "10 issues to review in total" in body,
+          f"status {s}")
+    check("ADA results carry the deadline care wording (Interim "
+          "Final Rule + not legal advice)",
+          "Interim Final Rule" in body and "not legal advice" in body)
+    check("ADA results show the unchecked PDF count",
+          "PDF documents linked (not checked)" in body)
+    rec = last_scan_record()
+    check("ADA scan stored as module ada", rec.get("module") == "ada")
+    s, body = get(f"/pack/{rec['id']}")
+    check("ADA evidence pack 200 with DRAFT stamp, module label "
+          "and deadline rows",
+          s == 200 and "DRAFT" in body and "ADA Title II Check" in body
+          and "April 26, 2027" in body
+          and "does not certify compliance" in body)
+    s, body = post("/ada", {"url": FIX + "/uscity/"})
+    check("ADA scan of uscity site: 0 issues in total",
+          s == 200 and "0 issues to review in total" in body)
+    s, body = post("/ada", {"url": "example.com"})
+    check("ADA scan rejects a URL without scheme (400)", s == 400)
+
+
 def _meta_description(body):
     import re as _re
     m = _re.search(r'<meta name="description" content="([^"]*)"',
@@ -864,8 +1208,8 @@ def app_seo_checks():
           '/scan">' in scan)
     s, sm = get("/sitemap.xml")
     expected = ["/", "/aoda-compliance-report", "/scan", "/filing",
-                "/loi25", "/francais", "/emailauth", "/postcheck",
-                "/vault"]
+                "/loi25", "/francais", "/emailauth", "/trackers",
+                "/ada", "/postcheck", "/vault"]
     check("seo: sitemap 200 listing exactly the public pages",
           s == 200
           and all(f"<loc>https://getnorthcheck.ca{p}</loc>" in sm
@@ -921,10 +1265,14 @@ def main():
         engine_francais_checks()
         engine_filing_checks()
         engine_emailauth_checks()
+        engine_trackers_checks()
+        engine_ada_checks()
         app_baseline_checks()
         app_new_module_checks()
         app_filing_checks()
         app_emailauth_checks()
+        app_trackers_checks()
+        app_ada_checks()
         app_seo_checks()
     finally:
         app.terminate()
