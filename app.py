@@ -3044,9 +3044,10 @@ def postcheck_form_page():
 <p>Paste a publicly advertised job posting. PostCheck checks it against
 Ontario's January 1, 2026 posting rules (O. Reg. 476/24): compensation
 and the $50,000 range cap, AI screening disclosure, vacancy statement,
-and the prohibited Canadian-experience requirement. Saving the posting
-starts its clocks: interviewed applicants notified within 45 days,
-records retained for 3 years.</p>
+and the prohibited Canadian-experience requirement. Checking a posting
+works out its clocks: interviewed applicants notified within 45 days,
+records retained for 3 years. The posting vault is paused, so postings
+are not saved on this site right now.</p>
 <div class="card">
   <form method="post" action="/postcheck">
     <label for="title">Posting title</label>
