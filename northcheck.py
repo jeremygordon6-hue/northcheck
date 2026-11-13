@@ -23,6 +23,23 @@ driven by the app's crawler):
                 cannot be enumerated, so a documented common-selector
                 list is checked and a not-found result never claims
                 DKIM is absent.
+  * trackers  : Tracker and Consent Check — known tracker / ad-tag
+                signatures, consent-platform signatures and Google
+                Consent Mode signals matched against the HTML exactly
+                as served (run_trackers_checks over the crawled
+                pages). No JavaScript is run, so the check reports
+                what is present in the page source and never claims
+                to prove when a tag fires in a real browser.
+  * ada       : ADA Title II Check — US state and local government
+                websites against WCAG 2.1 Level AA (run_ada_checks
+                over the crawled pages): the AODA page checks
+                re-issued under the WCAG 2.1 criteria they carry
+                into unchanged, plus iframe titles, zoom-blocking
+                viewports, WCAG 2.1's own input-purpose criterion,
+                a published accessibility statement / ADA contact,
+                and PDF documents named as not checked. Deadline
+                dates are stated as "under the current DOJ rule"
+                (see ADA_DEADLINE_* below).
   * filing    : AODA Complete the Filing — re-scan comparison
                 (compare_scan_pages: a finding counts as resolved only
                 when a later scan no longer reports it), an
@@ -1146,6 +1163,267 @@ def run_francais_checks(pages, attempts):
 
 
 # ---------------------------------------------------------------------------
+# Module ADA Title II Check — US state and local government websites
+# ---------------------------------------------------------------------------
+# The US Department of Justice's ADA Title II web and mobile app rule
+# requires state and local government web content to conform to
+# WCAG 2.1 Level AA. The compliance dates, as revised by the
+# Department's April 2026 Interim Final Rule, are April 26, 2027 for
+# public entities serving a population of 50,000 or more and
+# April 26, 2028 for smaller public entities and special district
+# governments. The 2026 revision is known to this codebase through
+# secondary reporting rather than a read of the Federal Register
+# text, so every surface that states the dates words them as "under
+# the current DOJ rule" and tells the reader to confirm the date
+# that applies to their entity.
+#
+# What the served HTML can honestly show, and what this module
+# checks: the per-page criteria the AODA checker already tests are
+# WCAG 2.0 Level A/AA criteria carried unchanged into WCAG 2.1 (same
+# numbers, same intent), so run_aoda_checks does the detection and
+# this module re-issues its findings under ADA rule ids with
+# WCAG 2.1 categories and the page URL prefixed to the evidence.
+# Added checks cover only what else the markup itself shows: frames
+# without titles, a viewport that blocks zoom, WCAG 2.1's own
+# Identify Input Purpose criterion (1.3.5 — no WCAG 2.0
+# equivalent), whether an accessibility statement / ADA contact is
+# published on the scanned pages, and PDF documents, which are web
+# content under the rule but cannot be read by an HTML scan and are
+# therefore named as not checked. Everything that needs rendering,
+# a keyboard, a screen reader or the inside of a document (contrast,
+# focus order, motion, app behaviour) is out of scope by design and
+# is never implied by these findings.
+
+ADA_DEADLINE_LARGE = "April 26, 2027"   # population 50,000 or more
+ADA_DEADLINE_SMALL = "April 26, 2028"   # smaller / special districts
+
+# The AODA rule ids carry into WCAG 2.1 unchanged; only the prefix
+# and the standard named in the category change.
+_ADA_RULE_IDS = {
+    "AODA-LANG": "ADA-LANG",
+    "AODA-TITLE": "ADA-TITLE",
+    "AODA-IMG-ALT": "ADA-IMG-ALT",
+    "AODA-LABEL": "ADA-LABEL",
+    "AODA-HEADING-ORDER": "ADA-HEADING-ORDER",
+    "AODA-LINK-EMPTY": "ADA-LINK-EMPTY",
+    "AODA-LINK-GENERIC": "ADA-LINK-GENERIC",
+    "AODA-BUTTON-TEXT": "ADA-BUTTON-TEXT",
+    "AODA-DUP-ID": "ADA-DUP-ID",
+}
+
+# Field names / ids that say a form control collects the kind of
+# personal information WCAG 2.1 · 1.3.5 (Identify Input Purpose)
+# covers. Matched as whole tokens against the control's name and id.
+_ADA_INPUT_PURPOSE_TOKENS = {
+    "email", "phone", "tel", "telephone", "mobile", "name", "fname",
+    "lname", "firstname", "lastname", "fullname", "address", "street",
+    "city", "state", "province", "zip", "postal", "country",
+    "username", "birth", "dob",
+}
+
+_ADA_STATEMENT_TEXT_PATTERNS = [
+    r"ada coordinator",
+    r"accessibility coordinator",
+    r"accessibility statement",
+    r"section 504 coordinator",
+]
+
+
+class AdaParser(AodaParser):
+    """AodaParser plus the collections the ADA checks add: iframes,
+    the viewport meta, and a count of links to PDF documents."""
+
+    def __init__(self):
+        super().__init__()
+        self.iframes = []      # {src, title}
+        self.viewport = None   # content of <meta name="viewport">
+        self.pdf_links = 0
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "iframe":
+            self.iframes.append({"src": a.get("src"),
+                                 "title": a.get("title")})
+        elif tag == "meta" \
+                and (a.get("name") or "").lower() == "viewport":
+            self.viewport = a.get("content") or ""
+        elif tag == "a":
+            href = (a.get("href") or "").split("?")[0].split("#")[0]
+            if href.lower().endswith(".pdf"):
+                self.pdf_links += 1
+        super().handle_starttag(tag, attrs)
+
+
+def run_ada_checks(pages):
+    """Return (findings, stats) for a crawled US public-sector site.
+
+    pages: list of {url, html} in crawl order — pages[0] is the
+    homepage the visitor entered.
+    """
+    findings = []
+    add = findings.append
+    if not pages:
+        return findings, {"pages_scanned": 0, "pages_with_findings": 0,
+                          "statement_found": False, "pdf_links": 0}
+    statement_found = False
+    pdf_links = 0
+    pages_with_findings = 0
+
+    for p in pages:
+        url = p["url"]
+        carried, _aoda_stats = run_aoda_checks(p["html"])
+        parser = AdaParser()
+        parser.feed(p["html"])
+        parser.close()
+        extra = []
+
+        for f in carried:
+            extra.append(make_finding(
+                "ada", _ADA_RULE_IDS[f["rule_id"]], f["severity"],
+                f["category"].replace("WCAG 2.0", "WCAG 2.1"),
+                f["explanation"].replace("WCAG 2.0", "WCAG 2.1"),
+                f"{url} :: {f['evidence']}",
+                f["fix"].replace("WCAG 2.0", "WCAG 2.1")))
+
+        # ADA-IFRAME-TITLE — WCAG 2.1 · 4.1.2 Name, Role, Value
+        for frame in parser.iframes:
+            if not (frame["title"] or "").strip():
+                src = frame["src"] or "(no src)"
+                extra.append(make_finding(
+                    "ada", "ADA-IFRAME-TITLE", "medium",
+                    "WCAG 2.1 · 4.1.2 Name, Role, Value",
+                    "This embedded frame (a video, map or form pulled "
+                    "into the page) has no title. Assistive technology "
+                    "announces a frame by its title; without one, a "
+                    "screen reader user moving through the page hears "
+                    "only \"frame\" and cannot tell what it is or "
+                    "decide to skip it.",
+                    f'{url} :: <iframe src="{src}">',
+                    "Give the frame a short descriptive title, e.g. "
+                    "<iframe title=\"City council meeting video\" "
+                    "...>."))
+
+        # ADA-VIEWPORT — WCAG 2.1 · 1.4.4 Resize Text
+        if parser.viewport:
+            squashed = parser.viewport.lower().replace(" ", "")
+            blocks_zoom = "user-scalable=no" in squashed
+            m = re.search(r"maximum-scale=([0-9.]+)", squashed)
+            if m and float(m.group(1)) < 2:
+                blocks_zoom = True
+            if blocks_zoom:
+                extra.append(make_finding(
+                    "ada", "ADA-VIEWPORT", "medium",
+                    "WCAG 2.1 · 1.4.4 Resize Text",
+                    "The page's viewport settings block or cap zoom "
+                    "(user-scalable=no, or a maximum scale below "
+                    "200%). Residents who enlarge text to read it — "
+                    "the readers the resize text criterion exists "
+                    "for — are prevented from doing so on phones and "
+                    "tablets.",
+                    f'{url} :: <meta name="viewport" '
+                    f'content="{parser.viewport}">',
+                    "Remove user-scalable=no and any maximum-scale "
+                    "below 2 from the viewport meta tag, so the page "
+                    "can be enlarged to at least 200%."))
+
+        # ADA-INPUT-PURPOSE — WCAG 2.1 · 1.3.5 Identify Input Purpose
+        for c in parser.controls:
+            if c["type"] == "hidden":
+                continue
+            if c["tag"] == "input" and c["type"] in (
+                    "submit", "button", "reset"):
+                continue
+            if (c["attrs"].get("autocomplete") or "").strip():
+                continue
+            tokens = set(re.split(
+                r"[^a-z0-9]+",
+                ((c["name"] or "") + " " + (c["id"] or "")).lower()))
+            if c["type"] in ("email", "tel") \
+                    or tokens & _ADA_INPUT_PURPOSE_TOKENS:
+                extra.append(make_finding(
+                    "ada", "ADA-INPUT-PURPOSE", "medium",
+                    "WCAG 2.1 · 1.3.5 Identify Input Purpose",
+                    "This field appears to collect personal "
+                    "information (its type or name says so) but "
+                    "carries no autocomplete attribute. Identify "
+                    "Input Purpose is new in WCAG 2.1, with no 2.0 "
+                    "equivalent: the field's purpose must be "
+                    "available in code so browsers and assistive "
+                    "technology can offer the resident's own details "
+                    "and present the field in a familiar way.",
+                    f"{url} :: " + _snippet(
+                        c["tag"], c["attrs"], ("type", "id", "name")),
+                    "Add the matching autocomplete token, e.g. "
+                    "autocomplete=\"email\" on an email field, "
+                    "autocomplete=\"tel\" on a phone field, or "
+                    "autocomplete=\"street-address\" on an address "
+                    "field."))
+
+        pdf_links += parser.pdf_links
+        if extra:
+            pages_with_findings += 1
+        findings.extend(extra)
+
+        if not statement_found:
+            site_page = parse_site_page(p["html"])
+            for link in site_page.links:
+                if "accessib" in (link["href"] or "").lower():
+                    statement_found = True
+                    break
+            if not statement_found:
+                for pattern in _ADA_STATEMENT_TEXT_PATTERNS:
+                    if re.search(pattern, site_page.text,
+                                 re.IGNORECASE):
+                        statement_found = True
+                        break
+
+    # ADA-STATEMENT — an accessibility contact published on the site
+    if not statement_found:
+        add(make_finding(
+            "ada", "ADA-STATEMENT", "low",
+            "ADA Title II · accessibility contact published",
+            "None of the scanned pages publishes an accessibility "
+            "statement, names an ADA coordinator, or explains how to "
+            "request an alternate format or raise an accessibility "
+            "grievance. Title II entities with 50 or more employees "
+            "must designate an ADA coordinator and adopt grievance "
+            "procedures, and residents look for exactly this page "
+            "first when something does not work for them. This is an "
+            "issue to review, not a determination that no "
+            "coordinator exists — only that none is published where "
+            "this scan looked.",
+            "(no accessibility statement, ADA coordinator or "
+            "grievance route found on the scanned pages)",
+            "Publish an accessibility page naming the ADA "
+            "coordinator and how to request accessible formats or "
+            "report a barrier, and link it from the site footer."))
+
+    # ADA-PDF-UNCHECKED — documents are covered; this scan reads HTML
+    if pdf_links:
+        add(make_finding(
+            "ada", "ADA-PDF-UNCHECKED", "info",
+            "ADA Title II · documents not checked",
+            f"The scanned pages link to {pdf_links} PDF "
+            "document(s). Documents a public entity posts are web "
+            "content under the Title II rule, but this scan reads "
+            "HTML only and cannot check inside a PDF — its tags, "
+            "reading order and image descriptions were not "
+            "reviewed.",
+            f"{pdf_links} PDF link(s) on the scanned pages",
+            "Check posted PDFs with a PDF accessibility checker, "
+            "and consider an HTML version for long or frequently "
+            "used documents."))
+
+    stats = {
+        "pages_scanned": len(pages),
+        "pages_with_findings": pages_with_findings,
+        "statement_found": statement_found,
+        "pdf_links": pdf_links,
+    }
+    return findings, stats
+
+
+# ---------------------------------------------------------------------------
 # Module Email Authentication Check — DMARC / SPF / DKIM from public DNS
 # ---------------------------------------------------------------------------
 # Deterministic checks over the domain's public DNS TXT records only:
@@ -1635,6 +1913,337 @@ def run_emailauth_checks(domain, resolver=None):
     if apex_failed and dmarc_stats.get("dmarc_lookup_failed"):
         stats["resolution_failed"] = True
         findings = []
+    return findings, stats
+
+
+# ---------------------------------------------------------------------------
+# Module Tracker and Consent Check — trackers vs consent, served HTML
+# ---------------------------------------------------------------------------
+# Deterministic detection over the HTML exactly as served (the pages
+# the app's crawler fetched — no JavaScript is run, nothing is
+# rendered). Known tracker / marketing-tag signatures, known
+# consent-platform signatures and Google Consent Mode signals are
+# matched against the raw markup of each scanned page.
+#
+# Honesty limits, repeated in the findings themselves: served HTML
+# shows which tags and consent tools are PRESENT in the page source.
+# It cannot prove when a tag fires in a real visitor's browser — a
+# tag manager container, a consent tool injected at runtime, or
+# server-side tagging can all change the order — so no finding here
+# claims a tracker fires before consent, and a consent banner's
+# presence is never reported as proof that tags wait for consent.
+
+TRACKERS_STAMP = (
+    "This check reports the tracker and consent signals found in "
+    "the HTML exactly as served at scan time. The page's JavaScript "
+    "was not run, so the check cannot show when a tag actually "
+    "fires in a visitor's browser. NorthCheck prepares evidence; "
+    "it does not certify compliance and is not legal advice."
+)
+
+# (key, display name, is a Google tag, substring markers, regexes).
+# Substrings are matched against the lowercased markup; regexes run
+# case-insensitively over the markup as served, and the matched text
+# is recorded as the evidence.
+TRACKER_SIGNATURES = [
+    ("google-analytics", "Google Analytics", True,
+     ("google-analytics.com", "gtag/js?id=", "googletagmanager.com/gtag",
+      "analytics.js"),
+     (r"\bua-\d{4,}-\d+\b",
+      r"gtag\(\s*['\"]config['\"]\s*,\s*['\"]g-[a-z0-9]{4,}")),
+    ("google-tag-manager", "Google Tag Manager", True,
+     ("googletagmanager.com/gtm.js", "gtm.start"),
+     (r"\bgtm-[a-z0-9]{6,}\b",)),
+    ("meta-pixel", "Meta (Facebook) Pixel", False,
+     ("connect.facebook.net", "fbevents.js", "fbq("),
+     ()),
+    ("google-ads", "Google Ads", True,
+     ("googleadservices.com", "googleads.g.doubleclick.net",
+      "google_conversion"),
+     (r"\baw-\d{6,}\b",)),
+    ("tiktok-pixel", "TikTok Pixel", False,
+     ("analytics.tiktok.com", "ttq.load", "ttq.track"),
+     ()),
+    ("linkedin-insight", "LinkedIn Insight Tag", False,
+     ("snap.licdn.com", "_linkedin_partner_id",
+      "_linkedin_data_partner_ids"),
+     ()),
+    ("hotjar", "Hotjar", False,
+     ("static.hotjar.com", "_hjsettings", "hjbootstrap"),
+     ()),
+    ("microsoft-clarity", "Microsoft Clarity", False,
+     ("clarity.ms",),
+     ()),
+    ("hubspot", "HubSpot Tracking", False,
+     ("js.hs-scripts.com", "js.hs-analytics.net", "js.hubspot.com"),
+     ()),
+    ("matomo", "Matomo / Piwik", False,
+     ("matomo.js", "piwik.js", "_paq.push", "matomo.cloud"),
+     ()),
+    ("segment", "Segment", False,
+     ("cdn.segment.com", "analytics.load("),
+     ()),
+]
+
+# (key, display name, substring markers) for consent management
+# platforms. Detection means the platform's code is present in the
+# served HTML — nothing more (see the honesty note above).
+CONSENT_PLATFORM_SIGNATURES = [
+    ("onetrust", "OneTrust",
+     ("onetrust.com", "otsdkstub", "optanon")),
+    ("cookiebot", "Cookiebot",
+     ("cookiebot.com", "consent.cookiebot.com")),
+    ("cookieyes", "CookieYes",
+     ("cookieyes.com", "cdn-cookieyes.com")),
+    ("termly", "Termly",
+     ("termly.io", "app.termly.io")),
+    ("osano", "Osano",
+     ("osano.com", "cmp.osano.com")),
+    ("trustarc", "TrustArc",
+     ("trustarc.com", "consent.trustarc.com", "truste.com")),
+    ("didomi", "Didomi",
+     ("didomi.io", "sdk.privacy-center.org")),
+    ("axeptio", "Axeptio",
+     ("static.axept.io", "axeptio.eu")),
+    ("iubenda", "iubenda",
+     ("iubenda.com", "cdn.iubenda.com")),
+    ("usercentrics", "Usercentrics",
+     ("usercentrics.eu", "app.usercentrics.eu")),
+    ("consentmanager", "consentmanager",
+     ("consentmanager.net", "cdn.consentmanager.net")),
+    ("quantcast", "Quantcast Choice",
+     ("quantcast.com/choice", "qc-cmp2-ui")),
+]
+
+# Class / id / file names that typically mark a home-grown cookie
+# banner in the served markup (no platform behind it).
+BANNER_MARKERS = ("cookie-banner", "cookie-consent", "cookiebanner",
+                  "cookie-notice", "cookie_notice", "cookie-popup",
+                  "cookie-modal", "cookie-bar", "cookie-law",
+                  "cookie-alert", "cookie-message", "consent-banner",
+                  "gdpr-banner")
+
+CONSENT_MODE_PARAMS = ("ad_storage", "analytics_storage",
+                       "ad_user_data", "ad_personalization")
+
+_CONSENT_CALL_RE = re.compile(
+    r"gtag\(\s*['\"]consent['\"]\s*,\s*['\"](default|update)['\"]",
+    re.IGNORECASE)
+
+
+def _match_signature(html_text, raw_lower, substrings, regexes):
+    """First matching marker for one signature, else None."""
+    for marker in substrings:
+        if marker in raw_lower:
+            return marker
+    for pattern in regexes:
+        m = re.search(pattern, html_text, re.IGNORECASE)
+        if m:
+            return m.group(0)
+    return None
+
+
+def run_trackers_checks(pages):
+    """Return (findings, stats) for a crawled site.
+
+    pages: list of {url, html} in crawl order — pages[0] is the
+    homepage the visitor entered. Detection runs over every scanned
+    page: a tracker or consent tool loaded site-wide is reported
+    once, with the pages it was seen on.
+    """
+    detected = {}        # signature key -> detail dict
+    platforms = {}       # signature key -> detail dict
+    banner_marker = None
+    consent_wording = None
+    consent_call_kinds = set()
+    consent_params = []
+    for p in pages:
+        url, html_text = p["url"], p["html"]
+        raw_lower = html_text.lower()
+        for key, name, is_google, substrings, regexes in \
+                TRACKER_SIGNATURES:
+            marker = _match_signature(html_text, raw_lower,
+                                      substrings, regexes)
+            if marker is None:
+                continue
+            entry = detected.setdefault(key, {
+                "key": key, "name": name, "google": is_google,
+                "pages": [], "markers": []})
+            if url not in entry["pages"]:
+                entry["pages"].append(url)
+            if marker not in entry["markers"]:
+                entry["markers"].append(marker)
+        for key, name, substrings in CONSENT_PLATFORM_SIGNATURES:
+            marker = _match_signature(html_text, raw_lower,
+                                      substrings, ())
+            if marker is None:
+                continue
+            entry = platforms.setdefault(key, {
+                "key": key, "name": name, "pages": [], "markers": []})
+            if url not in entry["pages"]:
+                entry["pages"].append(url)
+            if marker not in entry["markers"]:
+                entry["markers"].append(marker)
+        if banner_marker is None:
+            for marker in BANNER_MARKERS:
+                if marker in raw_lower:
+                    banner_marker = marker
+                    break
+        if consent_wording is None:
+            text = parse_site_page(html_text).text
+            for pattern in COOKIE_TEXT_PATTERNS:
+                m = re.search(pattern, text, re.IGNORECASE)
+                if m:
+                    consent_wording = m.group(0)
+                    break
+        for m in _CONSENT_CALL_RE.finditer(html_text):
+            consent_call_kinds.add(m.group(1).lower())
+        for param in CONSENT_MODE_PARAMS:
+            if param in raw_lower and param not in consent_params:
+                consent_params.append(param)
+
+    tracker_list = [detected[key] for key, *_rest
+                    in TRACKER_SIGNATURES if key in detected]
+    platform_list = [platforms[key] for key, *_rest
+                     in CONSENT_PLATFORM_SIGNATURES if key in platforms]
+    consent_mode_found = bool(consent_call_kinds) \
+        or len(consent_params) >= 2
+    consent_mechanism = bool(platform_list) or banner_marker is not None \
+        or consent_wording is not None
+    google_found = any(t["google"] for t in tracker_list)
+    names = ", ".join(t["name"] for t in tracker_list)
+
+    findings = []
+    add = findings.append
+    if not tracker_list:
+        add(make_finding(
+            "trackers", "TRACK-NONE-FOUND", "info",
+            "Trackers · none detected in the page source",
+            "None of the known tracker or marketing-tag signatures "
+            "this check looks for (Google Analytics, Google Tag "
+            "Manager, Meta Pixel, Google Ads, TikTok, LinkedIn, "
+            "Hotjar, Microsoft Clarity and similar) matched in the "
+            "HTML as served on the scanned pages. That is the clean "
+            "result this check can give — with two limits. Tags can "
+            "also be loaded at runtime by JavaScript or fired "
+            "server-side, neither of which leaves a signature in "
+            "the served HTML, and pages beyond the crawl cap were "
+            "not read.",
+            f"(no known tracker signature matched on "
+            f"{len(pages)} scanned page(s))",
+            "No fix implied. Re-run this check after adding any "
+            "marketing, analytics or chat tool, since each one "
+            "usually brings its own tracker."))
+    else:
+        evidence = "; ".join(
+            f"{t['name']} (signature: {t['markers'][0]})"
+            for t in tracker_list)
+        if not consent_mechanism:
+            add(make_finding(
+                "trackers", "TRACK-NO-CONSENT", "high",
+                "Trackers · no consent mechanism in the page source",
+                f"The page source loads these trackers: {names}. "
+                "No consent mechanism of any kind was found with "
+                "them — no known consent platform, no cookie banner "
+                "markup, and no consent wording on the scanned "
+                "pages. Quebec's Law 25 expects express consent for "
+                "cookies that identify, locate or profile a visitor, "
+                "and European rules expect consent before "
+                "non-essential tracking runs; regulators there fined "
+                "Google and Shein in 2025 over cookies placed before "
+                "consent. Read this finding for exactly what it "
+                "shows: the tags are present in the source and no "
+                "consent mechanism is visible there. It does not "
+                "prove the tags fire before consent in a real "
+                "browser — a tag manager or a script this crawl "
+                "cannot execute could still hold them back — so "
+                "confirm in the browser what loads before a first "
+                "time visitor makes any choice.",
+                evidence,
+                "Put a consent mechanism in front of the tags: run "
+                "a consent platform (or an equivalent banner), set "
+                "the trackers to wait for the visitor's consent "
+                "before they load, and keep the banner in the "
+                "served page, where visitors — and this scan — can "
+                "see it."))
+        else:
+            mech = []
+            if platform_list:
+                mech.append("consent platform: "
+                            + ", ".join(p["name"]
+                                        for p in platform_list))
+            if banner_marker:
+                mech.append(f"banner markup: {banner_marker}")
+            if consent_wording:
+                mech.append(f"consent wording: “{consent_wording}”")
+            add(make_finding(
+                "trackers", "TRACK-CONSENT-UNVERIFIED", "info",
+                "Trackers · consent mechanism present, blocking "
+                "not verified",
+                f"The page source loads these trackers: {names}. "
+                "A consent mechanism is present in the source ("
+                + "; ".join(mech) + "). That is the right shape — "
+                "and it is all this check can confirm. A banner's "
+                "presence does not prove the tags wait for consent: "
+                "many banners load every tag immediately and only "
+                "record the visitor's choice afterwards. Whether "
+                "these tags hold back until a visitor accepts can "
+                "only be settled in a real browser, by watching "
+                "which requests fire before any choice is made.",
+                evidence,
+                "Verify, do not assume: in a clean browser profile "
+                "with cookies cleared, load the homepage and watch "
+                "the network requests before clicking anything — "
+                "no tracker should fire before consent, and none "
+                "should fire at all after a decline. Repeat after "
+                "any change to the banner or the tag setup."))
+        if google_found and not consent_mode_found:
+            google_names = ", ".join(t["name"] for t in tracker_list
+                                     if t["google"])
+            add(make_finding(
+                "trackers", "TRACK-NO-CONSENT-MODE", "medium",
+                "Trackers · Google Consent Mode signals not found",
+                f"Google tags are present ({google_names}), but no "
+                "Google Consent Mode signals were found in the page "
+                "source: no gtag consent default or update call, "
+                "and the Consent Mode storage settings (ad_storage, "
+                "analytics_storage, ad_user_data, "
+                "ad_personalization) do not appear. Google has "
+                "required Consent Mode v2 for advertising "
+                "personalization in Europe since March 2024 and "
+                "began restricting conversion tracking and audience "
+                "building for accounts without it in July 2025 — "
+                "the cost lands on your own ad measurement first. "
+                "One limit: a consent platform may inject these "
+                "calls at runtime through JavaScript this crawl "
+                "does not run, so confirm in the browser or in "
+                "Google Tag Assistant before treating them as "
+                "missing for good.",
+                f"(no consent default/update call or Consent Mode "
+                f"storage settings in {len(pages)} scanned page(s))",
+                "Set Consent Mode v2 defaults before the Google "
+                "tags load (all four storage settings, denied until "
+                "the visitor chooses), and update them from the "
+                "visitor's consent choice — most consent platforms "
+                "can emit these calls once the setting is switched "
+                "on."))
+
+    stats = {
+        "pages_scanned": len(pages),
+        "trackers_found": [t["name"] for t in tracker_list],
+        "trackers_detail": tracker_list,
+        "tracker_count": len(tracker_list),
+        "google_tags_found": google_found,
+        "consent_platforms": [p["name"] for p in platform_list],
+        "consent_platforms_detail": platform_list,
+        "banner_detected": banner_marker is not None,
+        "banner_marker": banner_marker,
+        "consent_wording_found": consent_wording is not None,
+        "consent_mechanism_found": consent_mechanism,
+        "consent_mode_found": consent_mode_found,
+        "consent_mode_calls": sorted(consent_call_kinds),
+        "consent_mode_params": consent_params,
+    }
     return findings, stats
 
 
