@@ -8,8 +8,11 @@ Canadian SMB compliance platform, Phase 1 modules:
     Ontario's AODA asks about, and produce a dated evidence pack ahead
     of the December 31, 2026 accessibility compliance report deadline.
   * PostCheck ON — check a job posting against Ontario's Jan 1, 2026
-    posting rules (O. Reg. 476/24) and keep its 45-day / 3-year clocks
-    in a vault.
+    posting rules (O. Reg. 476/24) and work out its 45-day / 3-year
+    clocks on the results page. (The posting vault is PAUSED as of
+    the 2026-11-13 fix pass: /vault and /vault/save return the
+    branded 404 and no save button is offered, until per-customer
+    access exists. Stored vault data is left untouched.)
   * Loi25 Kit — Quebec Law 25 evidence from the public website:
     privacy policy linked from the homepage, a named privacy officer,
     a cookie consent mechanism, and a French privacy policy.
@@ -46,7 +49,7 @@ Canadian SMB compliance platform, Phase 1 modules:
   * Compliance Calendar — a public page rendering the engine's one
     deadline table (nc.COMPLIANCE_CALENDAR): dated deadlines, review
     cadences and ongoing duties kept distinct, plus the existing
-    monitoring offers shown together at their existing prices. No
+    monthly re-scan offers shown together at their existing prices. No
     bundle price exists and none is shown.
   * Evidence Binder — assembles one dated binder for a site from
     its stored scans across modules (a module with no scan on file
@@ -187,6 +190,14 @@ footer.site { max-width: 880px; margin: 0 auto; padding: 0 20px 40px;
               color: #5a6572; font-size: .9rem; }
 .small { color: #5a6572; font-size: .9rem; }
 .overdue { color: #7a1f28; font-weight: 700; }
+.skip { position: absolute; left: -9999px; top: 0; background: #fff;
+        color: #123524; padding: 10px 16px; z-index: 10;
+        font-weight: 700; }
+.skip:focus { left: 8px; top: 8px; }
+@media (max-width: 760px) {
+  header.site nav { float: none; margin-top: 8px; }
+  header.site nav a { display: inline-block; margin: 2px 14px 2px 0; }
+}
 """
 
 
@@ -267,13 +278,6 @@ PAGE_SEO = {
             "Check a job posting against Ontario's January 1, 2026 "
             "posting rules: the pay range cap, AI screening "
             "disclosure, vacancy statement, and the records rule.",
-    },
-    "Posting vault": {
-        "path": "/vault",
-        "description":
-            "The PostCheck vault: your saved Ontario job postings "
-            "with their clocks running — notify interviewed "
-            "applicants within 45 days, keep records for 3 years.",
     },
     "Scan results": {
         "description":
@@ -364,7 +368,7 @@ PAGE_SEO = {
 SITEMAP_PATHS = ["/", "/aoda-compliance-report", "/scan", "/filing",
                  "/loi25", "/francais", "/emailauth", "/trackers",
                  "/ada", "/register", "/calendar", "/binder",
-                 "/postcheck", "/vault"]
+                 "/postcheck"]
 
 
 def sitemap_xml():
@@ -378,6 +382,34 @@ def sitemap_xml():
 def robots_txt():
     return ("User-agent: *\nAllow: /\n"
             f"Sitemap: {BASE_URL}/sitemap.xml\n")
+
+
+def security_txt():
+    return ("Contact: mailto:jeremygordon6@gmail.com\n"
+            "Preferred-Languages: en, fr\n"
+            f"Canonical: {BASE_URL}/.well-known/security.txt\n"
+            "\n"
+            "NorthCheck is operated by CanCheck (Jeremy Gordon). "
+            "Please report\nsecurity issues with this site to the "
+            "contact above.\n")
+
+
+# Baseline security headers sent on every response. The CSP is a
+# baseline, not a strict policy: the pages are server-rendered with
+# an inline <style> block and inline JSON-LD <script> blocks, so
+# 'unsafe-inline' is required for style-src and script-src or the
+# site breaks; everything else is locked to 'self', framing is
+# denied (also via X-Frame-Options), and form posts go to 'self'.
+SECURITY_HEADERS = {
+    "Strict-Transport-Security": "max-age=31536000",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+    "Content-Security-Policy":
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+        "base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+}
 
 
 def _json_ld(data):
@@ -423,9 +455,11 @@ def home_json_ld():
          "before signing; it does not certify compliance and is not "
          "legal advice."),
         ("How much does NorthCheck cost?",
-         "Founding prices shown on this page: the AODA evidence pack "
-         "is $149, monitoring is $39/month, PostCheck ON is "
-         "$49/month, and the Complete Filing Pack is $249."),
+         "Founding prices shown on this page, in CAD: the AODA "
+         "evidence pack is $149 CAD, monitoring (a re-scan plan: "
+         "you ask, we re-run the scan — no automatic scheduler "
+         "yet) is $39 CAD/month, PostCheck ON is $49 CAD/month, "
+         "and the Complete Filing Pack is $249 CAD."),
     ]
     faq = {
         "@context": "https://schema.org",
@@ -481,9 +515,10 @@ def page(title, body, extra_head=""):
 <style>{CSS}</style>
 </head>
 <body>
+<a class="skip" href="#main">Skip to main content</a>
 <header class="site">
   <a href="/">NorthCheck</a>
-  <nav>
+  <nav aria-label="Primary">
     <a href="/scan">AODA scan</a>
     <a href="/filing">Complete the Filing</a>
     <a href="/postcheck">PostCheck</a>
@@ -495,10 +530,9 @@ def page(title, body, extra_head=""):
     <a href="/register">Register</a>
     <a href="/calendar">Calendar</a>
     <a href="/binder">Binder</a>
-    <a href="/vault">Vault</a>
   </nav>
 </header>
-<main>
+<main id="main">
 {body}
 </main>
 <footer class="site">
@@ -514,8 +548,11 @@ def page(title, body, extra_head=""):
 # ---------------------------------------------------------------------------
 
 def landing_page(joined=False):
-    thanks = ('<div class="notice">Thanks — you are on the founding list. '
-              'We will write when your module opens.</div>') if joined else ""
+    thanks = ('<div class="notice">Thanks — you are on the founding '
+              'list for the Loi25 Kit paid plan. We will write when '
+              'that plan opens. Checkout for the AODA packs and '
+              'PostCheck ON is open on this page.</div>') \
+        if joined else ""
     body = f"""
 <h1>Canadian compliance paperwork, checked before the deadline checks you.</h1>
 <p>NorthCheck is one platform for the Canadian rules small businesses
@@ -539,25 +576,27 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   page titles, images without alt text, unlabelled form fields, skipped
   heading levels, nameless links and buttons, duplicate ids), and builds
   a dated evidence pack for the December 31, 2026 filing.</p>
-  <p><strong>Founding price: $149</strong> per evidence pack ·
-  <strong>$39/month</strong> monitoring with re-scan alerts.</p>
-  <p><strong>Complete the Filing Pack</strong> — the report covers
-  every part of the Integrated Accessibility Standards Regulation,
-  not just the website, and a senior officer has to certify it. This
+  <p><strong>Founding price: $149 CAD</strong> per evidence pack ·
+  <strong>$39 CAD/month</strong> monitoring — a re-scan plan: you ask, we re-run the scan and compare it with your last scan. No automatic scheduler yet.</p>
+  <p><strong>Complete the Filing Pack</strong> — it prepares
+  evidence for every part of the report (the Integrated
+  Accessibility Standards Regulation), not just the website, and
+  the non-website answers in the pack are your own statements. A
+  senior officer has to certify the report. This
   fuller offer adds a remediation tracker (a finding counts as fixed
   only when a re-scan verifies it is gone — never on a say-so), an
   owner-answered checklist for the non-website standards, one Filing
   Pack that combines the website evidence with those answers and the
   remaining gaps, and a publish-ready accessibility statement for
-  your site. <strong>Founding price: $249</strong> for the Complete
+  your site. <strong>Founding price: $249 CAD</strong> for the Complete
   Filing Pack.</p>
   <p><a href="/aoda-compliance-report">What the December 31, 2026
   compliance report requires, in full</a></p>
   <a class="btn" href="/filing">Complete the Filing checklist</a>
-  <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249</a><br>
+  <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249 CAD</a><br>
   <a class="btn" href="/scan">Scan my website</a>
-  <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149</a>
-  <a class="btn" href="https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01">Add monitoring — $39/month</a>
+  <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149 CAD</a>
+  <a class="btn" href="https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01">Add monitoring — $39 CAD/month</a>
 </div>
 
 <div class="card">
@@ -568,10 +607,13 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   whether a vacancy exists, include no Canadian-experience requirement,
   notify interviewed applicants within 45 days, and keep records for
   3 years. PostCheck reads the posting the way the rule does, suggests
-  the corrected draft, and keeps the clocks in a vault.</p>
-  <p><strong>Founding price: $49/month</strong> flat per company.</p>
+  the corrected draft, and works out the posting's clocks.</p>
+  <p><strong>Founding price: $49 CAD/month</strong> flat per company.
+  The 45-day and 3-year clocks are worked out each time you check
+  a posting or ask for a re-scan — nothing runs on a schedule in
+  the background.</p>
   <a class="btn" href="/postcheck">Check a job posting</a>
-  <a class="btn" href="https://buy.stripe.com/14A8wI5oZairbCugbq5Rm02">Subscribe — $49/month</a>
+  <a class="btn" href="https://buy.stripe.com/14A8wI5oZairbCugbq5Rm02">Subscribe — $49 CAD/month</a>
 </div>
 
 <div class="card">
@@ -589,7 +631,10 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   offers it separately: the <a href="/register">Privacy Register</a>
   tool below is where you record incidents and requests yourself.
   This scan neither checks nor implies anything about a register.</p>
-  <p><strong>Founding price: $39/month</strong> per site.</p>
+  <p>The check is available now. The paid plan is on the founding
+  list. <strong>Founding price: $39 CAD/month</strong> per site.
+  Re-scans run when you ask and are compared with your last scan —
+  there is no automatic refresh.</p>
   <a class="btn" href="/loi25">Run the Loi25 check</a>
   <a class="btn" href="/#founding">Join the founding list</a>
 </div>
@@ -602,7 +647,7 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   declarations tying the versions together, and the French
   counterparts of your home, contact and privacy pages resolving
   in French.</p>
-  <p><strong>Included</strong> with a scan or monitoring plan.</p>
+  <p><strong>Included</strong> with a scan or a monitoring re-scan plan.</p>
   <a class="btn" href="/francais">Check my French version</a>
 </div>
 
@@ -617,7 +662,7 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   What it finds is what your DNS shows — no mailbox access, no sign-in,
   and when DKIM uses a selector name outside the common list, the
   report says so instead of claiming DKIM is absent.</p>
-  <p><strong>Free check</strong> · included with monitoring plans.</p>
+  <p><strong>Free check</strong> · included with monitoring re-scan plans.</p>
   <a class="btn" href="/emailauth">Check my domain's email records</a>
   <p class="small">Run Microsoft 365 for your firm? This check covers
   the public DNS side. The tenant side — accounts, app access,
@@ -639,7 +684,7 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   tag fires in a real browser — it shows you the tags and the
   consent signals, side by side, as dated evidence you can act
   on.</p>
-  <p><strong>Free check</strong> · included with monitoring plans.</p>
+  <p><strong>Free check</strong> · included with monitoring re-scan plans.</p>
   <a class="btn" href="/trackers">Check my site's trackers</a>
 </div>
 
@@ -667,9 +712,11 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
 
 <div class="card">
   <h2>Privacy Register <span class="badge">Module 8 — live</span></h2>
-  <p>Quebec's Law 25 (and PIPEDA, for federally regulated work)
-  expects an organization to keep a register of confidentiality
-  incidents — and no website scan can see whether you keep one.
+  <p>Quebec's Law 25 expects an organization to keep a register of
+  confidentiality incidents, and PIPEDA requires every
+  organization it covers to keep a record of every breach of
+  security safeguards for at least 24 months — and no website
+  scan can see whether you keep one.
   This tool is the register itself, not a check of it: you record
   each privacy incident (what happened, when you discovered it,
   who was affected, what you did, who was notified) and each
@@ -688,7 +735,7 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   2026 AODA report (and the 3-year cycle after it), the Ontario
   posting duties in force since January 1, 2026, Law 25's ongoing
   duties, and the ADA Title II dates in April 2027 and April 2028
-  under the current DOJ rule — with the monitoring offers shown
+  under the current DOJ rule — with the monthly re-scan offers shown
   together at their regular prices.</p>
   <a class="btn" href="/calendar">See the compliance calendar</a>
 </div>
@@ -708,9 +755,15 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
 
 <div class="card" id="founding">
   <h2>Join the founding list</h2>
-  <p>Founding pricing is locked for the first cohort. Leave an email and
-  we will write when your module opens. No email is sent by this form —
-  it only records your address for the launch note.</p>
+  <p>Checkout is open for the AODA evidence pack, AODA monitoring,
+  the Complete Filing Pack, and PostCheck ON. Français Check is
+  included with a scan or a monitoring re-scan plan, and the Email
+  Authentication Check is free.</p>
+  <p>The Loi25 Kit check is available now. Its paid plan stays on
+  this founding list. Founding pricing for that plan is locked for
+  the first cohort. Leave an email and we will write when the
+  Loi25 paid plan opens. No email is sent by this form — it only
+  records your address.</p>
   {thanks}
   <form method="post" action="/founding">
     <label for="email">Email address</label>
@@ -718,6 +771,11 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
            placeholder="you@yourbusiness.ca">
     <button type="submit">Join the founding list</button>
   </form>
+  <p class="small">CanCheck is operated by Jeremy Gordon. By
+  joining the founding list, you agree to receive email from
+  CanCheck about the Loi25 Kit paid plan and the offers above.
+  You can unsubscribe at any time — reply to any email and ask
+  to be removed, and we will remove you.</p>
 </div>
 
 <p class="small">{HONESTY_LINE} Every finding is an issue to review,
@@ -764,21 +822,24 @@ accessibility compliance report — and the next one is due
   <p><strong>Start with the free scan.</strong> Point the
   <a href="/scan">AODA scanner</a> at your website: it crawls up to
   {MAX_PAGES} pages, runs the deterministic WCAG 2.0 checks, and
-  builds a dated evidence pack. <strong>Founding price: $149</strong>
-  per evidence pack · <strong>$39/month</strong> monitoring with
-  re-scan alerts.</p>
+  builds a dated evidence pack. <strong>Founding price: $149 CAD</strong>
+  per evidence pack · <strong>$39 CAD/month</strong> monitoring — a
+  re-scan plan: you ask, we re-run the scan and compare it with
+  your last scan. No automatic scheduler yet. Checkout is open at
+  these founding prices.</p>
   <p><strong>The report covers more than the website.</strong> The
   <a href="/filing">Complete the Filing Pack</a> (<strong>founding
-  price: $249</strong>) adds a remediation tracker — a finding counts
+  price: $249 CAD</strong>) adds a remediation tracker — a finding counts
   as fixed only when a re-scan verifies it is gone, never on a
   say-so — an owner-answered checklist for the non-website
   standards, one Filing Pack that combines the website evidence with
   those answers and the remaining gaps, and a publish-ready
   accessibility statement for your site.</p>
   <a class="btn" href="/scan">Scan my website</a>
-  <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149</a><br>
+  <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149 CAD</a>
+  <a class="btn" href="https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01">Add monitoring — $39 CAD/month</a><br>
   <a class="btn" href="/filing">Complete the Filing checklist</a>
-  <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249</a>
+  <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249 CAD</a>
 </div>
 
 <div class="card">
@@ -1952,7 +2013,12 @@ def register_page(error=None):
 confidentiality incidents involving personal information, and both
 Law 25 and PIPEDA give individuals the right to ask for access to —
 or correction of — their personal information, with a response
-generally due within 30 days. None of that is visible on a website,
+generally due within 30 days. Under PIPEDA, the duty to keep a
+record of every breach of security safeguards applies to every
+organization PIPEDA covers — it is not limited to federally
+regulated work — and those records must be kept for at least
+24 months. (General information, not legal advice.) None of
+that is visible on a website,
 so no scan can check it. This tool keeps the register itself.</p>
 <div class="deadline">
   <strong>These entries are your organization's own records.</strong>
@@ -2186,7 +2252,9 @@ advisors.</p>
 
 def calendar_page(joined=False):
     thanks = ('<div class="notice">Thanks — you are on the founding '
-              'list. We will write when your module opens.</div>'
+              'list for the Loi25 Kit paid plan. We will write when '
+              'that plan opens. Checkout for the AODA packs and '
+              'PostCheck ON is open.</div>'
               if joined else "")
     rows = []
     for item in nc.COMPLIANCE_CALENDAR:
@@ -2216,40 +2284,44 @@ called ongoing duties.</p>
 
 <div class="card">
   <h2>Monitoring, honestly described</h2>
-  <p>There is no scheduler quietly re-scanning your site on its
-  own. What NorthCheck actually does today: every scan is stored,
+  <p>Monitoring, as it works today: you ask, we re-run the scan
+  and send you the comparison against your last scan. There is
+  no scheduler quietly re-scanning your site on its own. What
+  NorthCheck actually does today: every scan is stored,
   and when a site is scanned again, the new scan is compared with
   the previous one — findings that a re-scan no longer reports are
   shown as <strong>verified resolved by re-scan</strong>, alongside
   what is still open and what is new. That comparison is the
-  re-scan evidence the monitoring offers are built on, and it is
+  re-scan evidence the monthly re-scan offers are built on,
+  and it is
   why the AODA filing pack can say "fixed" without taking anyone's
   word for it.</p>
 </div>
 
 <div class="card">
   <h2>One subscription picture</h2>
-  <p>The existing monitoring offers, together at their regular
+  <p>The existing monthly re-scan offers, together at their regular
   founding prices. There is no separate bundle price — each offer
   keeps its own price and its own terms.</p>
   <table>
     <tr><th>Offer</th><th>Price</th><th>Where</th></tr>
     <tr>
-      <td>AODA monitoring — re-scan alerts on your website
-      evidence</td>
-      <td><strong>$39/month</strong></td>
+      <td>AODA monitoring — re-scans on request, compared
+      with your last scan</td>
+      <td><strong>$39 CAD/month</strong></td>
       <td><a href="/">See the AODA FileReady offer</a></td>
     </tr>
     <tr>
       <td>PostCheck ON — Ontario job posting checks with the
-      45-day and 3-year clocks kept in the vault</td>
-      <td><strong>$49/month</strong> flat per company</td>
+      45-day and 3-year clocks worked out
+      when a posting is checked or a re-scan is requested</td>
+      <td><strong>$49 CAD/month</strong> flat per company</td>
       <td><a href="/postcheck">See PostCheck ON</a></td>
     </tr>
     <tr>
-      <td>Loi25 Kit — Quebec Law 25 website evidence, refreshed
-      as your site changes</td>
-      <td><strong>$39/month</strong> per site</td>
+      <td>Loi25 Kit — Quebec Law 25 website evidence, re-run
+      when you ask and compared with your last scan</td>
+      <td><strong>$39 CAD/month</strong> per site</td>
       <td><a href="/loi25">See the Loi25 Kit</a></td>
     </tr>
   </table>
@@ -2260,6 +2332,11 @@ called ongoing duties.</p>
            placeholder="you@yourbusiness.ca">
     <button type="submit">Join the founding list</button>
   </form>
+  <p class="small">CanCheck is operated by Jeremy Gordon. By
+  joining the founding list, you agree to receive email from
+  CanCheck about the Loi25 Kit paid plan and the offers above.
+  You can unsubscribe at any time — reply to any email and ask
+  to be removed, and we will remove you.</p>
 </div>
 
 <p class="small">{HONESTY_LINE} Dates that rest on a rule that can
@@ -3034,12 +3111,9 @@ Compensation detected: {escape(details['compensation'])}</p>
   <strong>Retention-until:</strong> {ru.isoformat()}
   (date posted + 3 years) — keep this posting and its associated records
   at least until this date.</p>
-  <form method="post" action="/vault/save">
-    <input type="hidden" name="title" value="{escape(title, quote=True)}">
-    <input type="hidden" name="employer" value="{escape(employer, quote=True)}">
-    <input type="hidden" name="date_posted" value="{posted.isoformat()}">
-    <button type="submit">Save to vault</button>
-  </form>
+  <p class="small">The posting vault is paused: postings are not
+  saved on this site right now, so keep these two dates with the
+  posting itself.</p>
 </div>
 
 <p class="small">{escape(nc.DRAFT_STAMP, quote=False)}</p>
@@ -3048,57 +3122,14 @@ Compensation detected: {escape(details['compensation'])}</p>
 
 
 # ---------------------------------------------------------------------------
-# Vault
+# Posting vault — PAUSED (2026-11-13 fix pass, owner decision)
 # ---------------------------------------------------------------------------
-
-def vault_page(saved=False):
-    entries = load_list(VAULT_PATH)
-    notice = ('<div class="notice">Posting saved to the vault.</div>'
-              if saved else "")
-    if entries:
-        today = datetime.date.today()
-        rows = []
-        for e in entries:
-            try:
-                nb = datetime.date.fromisoformat(e["notify_by"])
-                remaining = (nb - today).days
-                if remaining < 0:
-                    days = (f'<span class="overdue">overdue by '
-                            f'{-remaining} day(s)</span>')
-                else:
-                    days = f"{remaining} day(s)"
-            except (KeyError, ValueError):
-                days = "—"
-            rows.append(f"""
-<tr>
-  <td>{escape(e.get('title', ''))}</td>
-  <td>{escape(e.get('employer', ''))}</td>
-  <td>{escape(e.get('date_posted', ''))}</td>
-  <td>{escape(e.get('notify_by', ''))}</td>
-  <td>{days}</td>
-  <td>{escape(e.get('retention_until', ''))}</td>
-</tr>""")
-        table = f"""
-<table>
-  <tr><th>Title</th><th>Employer</th><th>Date posted</th>
-      <th>Notify-by (+45 days)</th><th>Days remaining</th>
-      <th>Retention-until (+3 years)</th></tr>
-  {''.join(rows)}
-</table>"""
-    else:
-        table = ("<p>No postings saved yet. Run a posting through "
-                 "<a href=\"/postcheck\">PostCheck</a> and save it to "
-                 "start its clocks.</p>")
-    body = f"""
-<h1>Posting vault</h1>
-<p>Every saved posting with its Ontario clocks: interviewed applicants
-notified within 45 days of the posting date, and the posting plus its
-records retained for 3 years.</p>
-{notice}
-{table}
-<p class="small">{HONESTY_LINE}</p>
-"""
-    return page("Posting vault", body)
+# The vault had no per-customer access: every saved posting was
+# world-readable. GET /vault and POST /vault/save now fall through
+# to the branded 404, the results page offers no save button, and
+# /vault is out of the nav and the sitemap. The stored data file
+# (VAULT_PATH) is deliberately left untouched. Re-enable only with
+# per-customer access.
 
 
 # ---------------------------------------------------------------------------
@@ -3120,15 +3151,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
+        for k, v in SECURITY_HEADERS.items():
+            self.send_header(k, v)
         for k, v in (extra_headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(payload)
+        if not getattr(self, "_head_only", False):
+            self.wfile.write(payload)
 
     def _redirect(self, location):
         self.send_response(303)
         self.send_header("Location", location)
         self.send_header("Content-Length", "0")
+        for k, v in SECURITY_HEADERS.items():
+            self.send_header(k, v)
         self.end_headers()
 
     def _form(self):
@@ -3145,6 +3181,13 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- routes -----------------------------------------------------------
 
+    def do_HEAD(self):
+        # Same routing, status and headers as GET (including the
+        # security headers and Content-Length); _send withholds the
+        # body, as HEAD requires.
+        self._head_only = True
+        self.do_GET()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -3154,6 +3197,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, landing_page(joined=joined))
         elif path == "/aoda-compliance-report":
             self._send(200, aoda_report_page())
+        elif path == "/.well-known/security.txt":
+            self._send(200, security_txt(),
+                       content_type="text/plain; charset=utf-8")
         elif path == "/sitemap.xml":
             self._send(200, sitemap_xml(),
                        content_type="application/xml; charset=utf-8")
@@ -3253,9 +3299,6 @@ class Handler(BaseHTTPRequestHandler):
                             f'_binder_{record["id"]}.html"'})
         elif path == "/postcheck":
             self._send(200, postcheck_form_page())
-        elif path == "/vault":
-            saved = query.get("saved", [""])[0] == "1"
-            self._send(200, vault_page(saved=saved))
         elif path.startswith("/pack/"):
             scan_id = path[len("/pack/"):]
             record = next((s for s in load_list(SCANS_PATH)
@@ -3584,33 +3627,10 @@ class Handler(BaseHTTPRequestHandler):
             suggestions = nc.corrected_draft_suggestions(findings)
             self._send(200, postcheck_results_page(
                 title, employer, posted, findings, details, suggestions))
-        elif path == "/vault/save":
-            title = (form.get("title") or "").strip() or "Untitled posting"
-            employer = (form.get("employer") or "").strip() \
-                or "Not stated"
-            try:
-                posted = datetime.date.fromisoformat(
-                    (form.get("date_posted") or "").strip())
-            except ValueError:
-                self._send(400, page(
-                    "Could not save",
-                    "<h1>The posting date was missing or unreadable</h1>"
-                    "<p><a href=\"/postcheck\">Back to PostCheck</a></p>"))
-                return
-            entry = {
-                "title": title,
-                "employer": employer,
-                "date_posted": posted.isoformat(),
-                "notify_by": nc.notify_by(posted).isoformat(),
-                "retention_until": nc.retention_until(posted).isoformat(),
-                "saved_at": datetime.datetime.now().isoformat(
-                    timespec="seconds"),
-            }
-            entries = load_list(VAULT_PATH)
-            entries.append(entry)
-            _save(VAULT_PATH, entries)
-            self._redirect("/vault?saved=1")
         else:
+            # /vault/save also lands here: the vault is paused, so
+            # saving a posting returns the branded 404 and writes
+            # nothing.
             self._not_found()
 
 
