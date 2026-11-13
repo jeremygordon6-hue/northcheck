@@ -625,8 +625,8 @@ def app_new_module_checks():
           "Français Check" in body and "Module 4 — live" in body)
     check("landing has no Coming soon badge left",
           "Coming soon" not in body)
-    check("landing shows Loi25 founding price $39/month per site",
-          "$39/month</strong> per site" in body)
+    check("landing shows Loi25 founding price $39 CAD/month per site",
+          "$39 CAD/month</strong> per site" in body)
     check("landing presents Français Check as included",
           "Included</strong> with a scan or monitoring plan" in body)
     s, body = get("/loi25")
@@ -891,6 +891,38 @@ def app_seo_checks():
           "$149" in body and "$249" in body)
 
 
+def app_copy_consistency_checks():
+    print("App — checkout copy matches the working paths")
+    s, body = get("/")
+    check("landing does not tell buyers a module is still closed",
+          "when your module opens" not in body)
+    check("landing says checkout is open for the Stripe-backed offers",
+          "Checkout is open" in body
+          and "Checkout is open at these founding prices." in body)
+    check("landing keeps the four live Stripe payment links",
+          "https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00" in body
+          and "https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01" in body
+          and "https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06" in body
+          and "https://buy.stripe.com/14A8wI5oZairbCugbq5Rm02" in body)
+    check("landing labels the product prices in CAD",
+          "$149 CAD" in body and "$249 CAD" in body
+          and "$39 CAD/month" in body and "$49 CAD/month" in body)
+    check("landing keeps the Loi25 paid plan on the founding list",
+          "Its paid plan stays on this" in body
+          and "founding list." in body
+          and "locked for the first" in body)
+    s, joined = get("/?joined=1")
+    check("founding thanks names the Loi25 paid plan",
+          s == 200 and "Loi25 Kit paid plan" in joined
+          and "when your module opens" not in joined)
+    s, report = get("/aoda-compliance-report")
+    check("aoda report page labels prices in CAD and links monitoring",
+          s == 200 and "$149 CAD" in report and "$249 CAD" in report
+          and "$39 CAD/month" in report
+          and "https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01" in report
+          and "Checkout is open at these founding prices." in report)
+
+
 def main():
     backup_dir = DATA_DIR + ".check-backup"
     if os.path.exists(backup_dir):
@@ -926,6 +958,7 @@ def main():
         app_filing_checks()
         app_emailauth_checks()
         app_seo_checks()
+        app_copy_consistency_checks()
     finally:
         app.terminate()
         fix.shutdown()

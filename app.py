@@ -335,9 +335,12 @@ def home_json_ld():
          "before signing; it does not certify compliance and is not "
          "legal advice."),
         ("How much does NorthCheck cost?",
-         "Founding prices shown on this page: the AODA evidence pack "
-         "is $149, monitoring is $39/month, PostCheck ON is "
-         "$49/month, and the Complete Filing Pack is $249."),
+         "Checkout is open at the founding prices on this page, in "
+         "CAD: the AODA evidence pack is $149 CAD, monitoring is "
+         "$39 CAD/month, PostCheck ON is $49 CAD/month, and the "
+         "Complete Filing Pack is $249 CAD. The Loi25 Kit check is "
+         "available now; its paid plan is $39 CAD/month and stays on "
+         "the founding list."),
     ]
     faq = {
         "@context": "https://schema.org",
@@ -421,8 +424,10 @@ def page(title, body, extra_head=""):
 # ---------------------------------------------------------------------------
 
 def landing_page(joined=False):
-    thanks = ('<div class="notice">Thanks — you are on the founding list. '
-              'We will write when your module opens.</div>') if joined else ""
+    thanks = ('<div class="notice">Thanks — you are on the founding list '
+              'for the Loi25 Kit paid plan. We will write when that '
+              'plan opens. Checkout for the AODA packs and PostCheck ON '
+              'is open on this page.</div>') if joined else ""
     body = f"""
 <h1>Canadian compliance paperwork, checked before the deadline checks you.</h1>
 <p>NorthCheck is one platform for the Canadian rules small businesses
@@ -446,8 +451,8 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   page titles, images without alt text, unlabelled form fields, skipped
   heading levels, nameless links and buttons, duplicate ids), and builds
   a dated evidence pack for the December 31, 2026 filing.</p>
-  <p><strong>Founding price: $149</strong> per evidence pack ·
-  <strong>$39/month</strong> monitoring with re-scan alerts.</p>
+  <p><strong>Founding price: $149 CAD</strong> per evidence pack ·
+  <strong>$39 CAD/month</strong> monitoring with re-scan alerts.</p>
   <p><strong>Complete the Filing Pack</strong> — the report covers
   every part of the Integrated Accessibility Standards Regulation,
   not just the website, and a senior officer has to certify it. This
@@ -456,15 +461,16 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   owner-answered checklist for the non-website standards, one Filing
   Pack that combines the website evidence with those answers and the
   remaining gaps, and a publish-ready accessibility statement for
-  your site. <strong>Founding price: $249</strong> for the Complete
+  your site. <strong>Founding price: $249 CAD</strong> for the Complete
   Filing Pack.</p>
+  <p>Checkout is open at these founding prices.</p>
   <p><a href="/aoda-compliance-report">What the December 31, 2026
   compliance report requires, in full</a></p>
   <a class="btn" href="/filing">Complete the Filing checklist</a>
-  <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249</a><br>
+  <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249 CAD</a><br>
   <a class="btn" href="/scan">Scan my website</a>
-  <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149</a>
-  <a class="btn" href="https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01">Add monitoring — $39/month</a>
+  <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149 CAD</a>
+  <a class="btn" href="https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01">Add monitoring — $39 CAD/month</a>
 </div>
 
 <div class="card">
@@ -476,9 +482,10 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   notify interviewed applicants within 45 days, and keep records for
   3 years. PostCheck reads the posting the way the rule does, suggests
   the corrected draft, and keeps the clocks in a vault.</p>
-  <p><strong>Founding price: $49/month</strong> flat per company.</p>
+  <p><strong>Founding price: $49 CAD/month</strong> flat per company.
+  Checkout is open.</p>
   <a class="btn" href="/postcheck">Check a job posting</a>
-  <a class="btn" href="https://buy.stripe.com/14A8wI5oZairbCugbq5Rm02">Subscribe — $49/month</a>
+  <a class="btn" href="https://buy.stripe.com/14A8wI5oZairbCugbq5Rm02">Subscribe — $49 CAD/month</a>
 </div>
 
 <div class="card">
@@ -492,7 +499,8 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
   evidence pack as AODA FileReady. Law 25 duties that leave no trace
   on a website (an incident register, privacy impact assessments)
   are out of scope and are never implied.</p>
-  <p><strong>Founding price: $39/month</strong> per site.</p>
+  <p>The check is available now. The paid plan is on the founding
+  list. <strong>Founding price: $39 CAD/month</strong> per site.</p>
   <a class="btn" href="/loi25">Run the Loi25 check</a>
   <a class="btn" href="/#founding">Join the founding list</a>
 </div>
@@ -530,9 +538,14 @@ findings, and a dated evidence pack a signing officer can rely on.</p>
 
 <div class="card" id="founding">
   <h2>Join the founding list</h2>
-  <p>Founding pricing is locked for the first cohort. Leave an email and
-  we will write when your module opens. No email is sent by this form —
-  it only records your address for the launch note.</p>
+  <p>Checkout is open for the AODA evidence pack, AODA monitoring, the
+  Complete Filing Pack, and PostCheck ON. Français Check is included
+  with a scan or monitoring plan, and the Email Authentication Check
+  is free.</p>
+  <p>The Loi25 Kit check is available now. Its paid plan stays on this
+  founding list. Founding pricing for that plan is locked for the first
+  cohort. Leave an email and we will write when the Loi25 paid plan
+  opens. No email is sent by this form — it only records your address.</p>
   {thanks}
   <form method="post" action="/founding">
     <label for="email">Email address</label>
@@ -586,21 +599,22 @@ accessibility compliance report — and the next one is due
   <p><strong>Start with the free scan.</strong> Point the
   <a href="/scan">AODA scanner</a> at your website: it crawls up to
   {MAX_PAGES} pages, runs the deterministic WCAG 2.0 checks, and
-  builds a dated evidence pack. <strong>Founding price: $149</strong>
-  per evidence pack · <strong>$39/month</strong> monitoring with
-  re-scan alerts.</p>
+  builds a dated evidence pack. <strong>Founding price: $149 CAD</strong>
+  per evidence pack · <strong>$39 CAD/month</strong> monitoring with
+  re-scan alerts. Checkout is open at these founding prices.</p>
   <p><strong>The report covers more than the website.</strong> The
   <a href="/filing">Complete the Filing Pack</a> (<strong>founding
-  price: $249</strong>) adds a remediation tracker — a finding counts
+  price: $249 CAD</strong>) adds a remediation tracker — a finding counts
   as fixed only when a re-scan verifies it is gone, never on a
   say-so — an owner-answered checklist for the non-website
   standards, one Filing Pack that combines the website evidence with
   those answers and the remaining gaps, and a publish-ready
   accessibility statement for your site.</p>
   <a class="btn" href="/scan">Scan my website</a>
-  <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149</a><br>
+  <a class="btn" href="https://buy.stripe.com/eVqaEQ6t32PZ6iaaR65Rm00">Buy the evidence pack — $149 CAD</a>
+  <a class="btn" href="https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01">Add monitoring — $39 CAD/month</a><br>
   <a class="btn" href="/filing">Complete the Filing checklist</a>
-  <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249</a>
+  <a class="btn" href="https://buy.stripe.com/cNi00c4kVgGP9um5wM5Rm06">Buy the Complete Filing Pack — $249 CAD</a>
 </div>
 
 <div class="card">
