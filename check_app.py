@@ -7,7 +7,8 @@ ports, then asserts:
 
   * the Phase 1 engine regression counts (demo AODA 10, PostCheck 4);
   * the pre-existing pages and flows (landing, /scan, /postcheck,
-    /vault, evidence pack download, posting clocks);
+    evidence pack download, posting clocks — the posting vault is
+    paused since the 2026-11-13 fix pass and must 404);
   * Loi25 Kit: engine findings on the three fixtures (bad 3, good 0,
     mid 1), the /loi25 form and scan flow, and its evidence pack;
   * Français Check: engine findings (bad 4, good 0, mid 1, plus the
@@ -468,8 +469,23 @@ def fixture_resolver(name):
 # ---------------------------------------------------------------------------
 
 def get(path):
-    with urllib.request.urlopen(BASE + path, timeout=15) as r:
-        return r.status, r.read().decode("utf-8", "replace")
+    try:
+        with urllib.request.urlopen(BASE + path, timeout=15) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+
+
+def request_raw(method, path):
+    """(status, headers dict, body) for header / HEAD assertions."""
+    req = urllib.request.Request(BASE + path, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status, dict(r.headers), \
+                r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), \
+            e.read().decode("utf-8", "replace")
 
 
 def post(path, data):
@@ -875,7 +891,13 @@ def app_baseline_checks():
     check("/postcheck 200 with form",
           s == 200 and 'name="posting_text"' in body)
     s, body = get("/vault")
-    check("/vault 200", s == 200)
+    check("/vault is paused: branded 404, no vault page",
+          s == 404 and "Not found" in body
+          and "Posting vault" not in body)
+    s, body = post("/vault/save", {
+        "title": "T", "employer": "E", "date_posted": "2026-11-07"})
+    check("/vault/save is paused: 404 and nothing saved",
+          s == 404)
     s, body = post("/scan", {"url": FIX + "/"})
     check("AODA scan of demo page: 10 issues in total",
           s == 200 and "10 issues to review in total" in body)
@@ -891,6 +913,10 @@ def app_baseline_checks():
     check("PostCheck flow 200", s == 200)
     check("PostCheck shows notify-by 2026-12-22", "2026-12-22" in body)
     check("PostCheck shows retention 2029-11-07", "2029-11-07" in body)
+    check("PostCheck results offer no Save to vault button "
+          "(vault paused)",
+          "Save to vault" not in body and "/vault/save" not in body
+          and "vault is paused" in body)
 
 
 def app_new_module_checks():
@@ -902,10 +928,16 @@ def app_new_module_checks():
           "Français Check" in body and "Module 4 — live" in body)
     check("landing has no Coming soon badge left",
           "Coming soon" not in body)
-    check("landing shows Loi25 founding price $39/month per site",
-          "$39/month</strong> per site" in body)
+    check("landing shows Loi25 founding price $39 CAD/month per site",
+          "$39 CAD/month</strong> per site" in body)
     check("landing presents Français Check as included",
-          "Included</strong> with a scan or monitoring plan" in body)
+          "Included</strong> with a scan or a monitoring re-scan plan" in body)
+    check("landing qualifies the monthly monitoring offers as "
+          "re-scans on request (no automatic scheduler)",
+          "you ask, we re-run the scan" in body
+          and "No automatic scheduler yet" in body)
+    check("landing no longer promises re-scan alerts",
+          "re-scan alerts" not in body)
     s, body = get("/loi25")
     check("/loi25 200 with form", s == 200 and 'name="url"' in body)
     s, body = get("/francais")
@@ -1316,8 +1348,12 @@ def app_calendar_checks():
           "no scheduler" in body
           and "verified resolved by re-scan" in body)
     check("calendar bundle section lists the existing monitoring "
-          "prices",
-          "$39/month" in body and "$49/month" in body)
+          "prices in CAD",
+          "$39 CAD/month" in body and "$49 CAD/month" in body)
+    check("calendar bundle describes the offers as re-scans on "
+          "request (no refresh-as-your-site-changes claim)",
+          "when you ask" in body and "as your site changes" not in body
+          and "re-scans on request" in body)
     check("calendar carries no Stripe link at all (no new or "
           "bundle price invented)",
           "buy.stripe.com" not in body)
@@ -1473,7 +1509,7 @@ def app_seo_checks():
     expected = ["/", "/aoda-compliance-report", "/scan", "/filing",
                 "/loi25", "/francais", "/emailauth", "/trackers",
                 "/ada", "/register", "/calendar", "/binder",
-                "/postcheck", "/vault"]
+                "/postcheck"]
     check("seo: sitemap 200 listing exactly the public pages",
           s == 200
           and all(f"<loc>https://getnorthcheck.ca{p}</loc>" in sm
@@ -1497,6 +1533,81 @@ def app_seo_checks():
           and "does not certify" in body)
     check("aoda report page names both pack prices ($149 / $249)",
           "$149" in body and "$249" in body)
+
+
+def app_fix_pass_checks():
+    print("\n== Fix pass (2026-11-13): vault pause, CAD, copy, "
+          "headers, CASL, nav ==")
+    # A — vault paused everywhere it was reachable
+    s, body = get("/")
+    check("fix: landing nav has no vault link",
+          'href="/vault"' not in body)
+    s, sm = get("/sitemap.xml")
+    check("fix: sitemap no longer lists /vault",
+          s == 200 and "/vault" not in sm)
+    # B — CAD labels on the landing prices and FAQ
+    check("fix: landing labels its prices in CAD",
+          "$149 CAD" in body and "$249 CAD" in body
+          and "$39 CAD/month" in body and "$49 CAD/month" in body)
+    # D — founding copy: checkout open, Loi25 plan named exactly
+    check("fix: landing founding copy says checkout is open and "
+          "keeps only the Loi25 plan on the list",
+          "Checkout is open" in body
+          and "when your module opens" not in body
+          and "Loi25 paid plan opens" in body)
+    s, joined = get("/?joined=1")
+    check("fix: founding thanks names the Loi25 paid plan",
+          s == 200 and "Loi25 Kit paid plan" in joined
+          and "when your module opens" not in joined)
+    s, report = get("/aoda-compliance-report")
+    check("fix: aoda report page labels prices in CAD with the "
+          "monitoring link present",
+          s == 200 and "$149 CAD" in report and "$249 CAD" in report
+          and "$39 CAD/month" in report
+          and "https://buy.stripe.com/cNi3co4kV4Y77meaR65Rm01"
+          in report)
+    # G — Register PIPEDA wording
+    s, reg = get("/register")
+    check("fix: register states the PIPEDA breach-record duty "
+          "applies to every covered organization, 24 months",
+          s == 200 and "every" in reg and "24 months" in reg
+          and "not limited to federally" in reg)
+    check("fix: landing register card no longer limits PIPEDA to "
+          "federally regulated work",
+          "PIPEDA, for federally regulated work" not in body
+          and "at least 24 months" in body)
+    # I — CASL consent line under the founding form
+    check("fix: founding form carries the CASL consent line "
+          "(operator named, unsubscribe any time)",
+          "CanCheck is operated by Jeremy Gordon" in body
+          and "unsubscribe at any time" in body)
+    # J — skip link + labelled nav
+    check("fix: pages carry a skip link and an aria-labelled nav",
+          'class="skip"' in body and 'aria-label="Primary"' in body
+          and '<main id="main">' in body)
+    # H — security headers, HEAD, security.txt
+    s, headers, _b = request_raw("GET", "/")
+    check("fix: responses carry the five security headers",
+          s == 200
+          and headers.get("Strict-Transport-Security")
+          == "max-age=31536000"
+          and headers.get("X-Content-Type-Options") == "nosniff"
+          and headers.get("X-Frame-Options") == "DENY"
+          and headers.get("Referrer-Policy") == "same-origin"
+          and "default-src 'self'" in headers.get(
+              "Content-Security-Policy", ""))
+    s, headers, hbody = request_raw("HEAD", "/")
+    check("fix: HEAD / answers like GET (200, headers, no body)",
+          s == 200 and hbody == ""
+          and headers.get("X-Frame-Options") == "DENY"
+          and int(headers.get("Content-Length", "0")) > 0)
+    s, _headers, _b = request_raw("HEAD", "/no-such-page")
+    check("fix: HEAD on an unknown path is 404, not 501",
+          s == 404)
+    s, body = get("/.well-known/security.txt")
+    check("fix: security.txt published with the contact address",
+          s == 200
+          and "Contact: mailto:jeremygordon6@gmail.com" in body)
 
 
 def main():
@@ -1541,6 +1652,7 @@ def main():
         app_calendar_checks()
         app_binder_checks()
         app_seo_checks()
+        app_fix_pass_checks()
     finally:
         app.terminate()
         fix.shutdown()
